@@ -1,0 +1,23 @@
+$kind: http-request
+url: http://localhost:9005/electrical/6a9fcd915dfafadc821de37f
+method: PUT
+body:
+  type: json
+  content: "{\r
+
+    \  \"name\": \"Deepak Adhikari\",\r
+
+    \  \"phone\": \"9823456789\",\r
+
+    \  \"email\": \"deepakelectric@gmail.com\",\r
+
+    \  \"address\": \"Chabahil, Kathmandu\",\r
+
+    \  \"experience\": 9,\r
+
+    \  \"description\": \"Professional electrician specializing in house wiring, electrical repairs, lighting installation and maintenance.\",\r
+
+    \  \"availability\": \"Available\"\r
+
+    }"
+order: 851129107486891

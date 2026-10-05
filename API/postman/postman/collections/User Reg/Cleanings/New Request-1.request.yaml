@@ -1,0 +1,8 @@
+$kind: http-request
+name: New Request
+url: http://localhost:9005/cleaning/6a9fd2d1f26673392b23a1fc
+method: DELETE
+body:
+  type: json
+  content: ""
+order: 4234362841429071

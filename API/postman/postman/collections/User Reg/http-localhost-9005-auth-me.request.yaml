@@ -1,0 +1,12 @@
+$kind: http-request
+name: http://localhost:9005/auth/me
+description: ""
+url: http://localhost:9005/auth/me
+method: GET
+headers:
+  Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2YTlhYWM1ZmMzY2I5ZTdlZjhkYzExZGQiLCJlbWFpbCI6ImFheXVzaGNoYXVkaGFyeTI2MEBnbWFpbC5jb20iLCJyb2xlIjoidXNlciIsInR5cGUiOiJCZWFyZXIiLCJpYXQiOjE3ODg1MzkzMTksImV4cCI6MTc4ODU1MDExOX0.dJIM352esSj4X5DNi6DIVmmY1nh4Lu1g9sPkxQ2aWoY
+auth:
+  type: bearer
+  credentials:
+    token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2YTlhYWM1ZmMzY2I5ZTdlZjhkYzExZGQiLCJlbWFpbCI6ImFheXVzaGNoYXVkaGFyeTI2MEBnbWFpbC5jb20iLCJyb2xlIjoidXNlciIsInR5cGUiOiJCZWFyZXIiLCJpYXQiOjE3ODg1MzkzNzMsImV4cCI6MTc4ODU0NjU3M30.WlKe61upZHM6JChhiNsl_GVrbmJFGNlutNYOITa3MDk
+order: 4302198967772621

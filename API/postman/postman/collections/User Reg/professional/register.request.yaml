@@ -1,0 +1,4 @@
+$kind: http-request
+url: http://localhost:9005/provider/service/cleaner
+method: GET
+order: 1789197530282

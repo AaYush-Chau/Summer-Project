@@ -1,0 +1,53 @@
+$kind: http-request
+url: http://localhost:9005/cleaning
+method: POST
+body:
+  type: formdata
+  content:
+    - type: text
+      key: name
+      value: Sujal Shrestha
+      description: ""
+      disabled: false
+    - type: text
+      key: phone
+      value: "9876564357"
+      description: ""
+      disabled: false
+    - type: text
+      key: email
+      value: sujal3@gmail.com
+      description: ""
+      disabled: false
+    - type: text
+      key: address
+      value: khusibu
+      description: ""
+      disabled: false
+    - type: text
+      key: experience
+      value: "5"
+      description: ""
+      disabled: false
+    - type: text
+      key: price
+      value: "700"
+      description: ""
+      disabled: false
+    - type: text
+      key: description
+      value: Professional cleaner
+      description: ""
+      disabled: false
+    - type: file
+      key: image
+      src:
+        - /C:/Users/ACER/OneDrive/Desktop/Photos/sujal.jpg
+      description: ""
+      disabled: false
+    - type: text
+      key: availability
+      value: Available
+      description: ""
+      disabled: false
+order: 1788859035907

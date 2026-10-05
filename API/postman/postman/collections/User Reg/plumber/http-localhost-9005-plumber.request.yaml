@@ -1,0 +1,9 @@
+$kind: http-request
+name: http://localhost:9005/plumber
+description: ""
+url: http://localhost:9005/plumber
+method: GET
+body:
+  type: json
+  content: ""
+order: 1788856086616

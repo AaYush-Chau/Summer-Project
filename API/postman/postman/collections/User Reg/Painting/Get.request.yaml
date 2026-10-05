@@ -1,0 +1,4 @@
+$kind: http-request
+url: http://localhost:9005/painting
+method: GET
+order: 1788859703438

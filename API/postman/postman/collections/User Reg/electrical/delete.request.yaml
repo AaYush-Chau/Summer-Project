@@ -1,0 +1,4 @@
+$kind: http-request
+url: http://localhost:9005/electrical/6a9fcd915dfafadc821de37f
+method: DELETE
+order: 2697531087843155

@@ -1,0 +1,53 @@
+$kind: http-request
+url: http://localhost:9005/plumber
+method: POST
+body:
+  type: formdata
+  content:
+    - type: text
+      key: name
+      value: Regisha Maharjan
+      description: ""
+      disabled: false
+    - type: text
+      key: phone
+      value: "9835461234"
+      description: ""
+      disabled: false
+    - type: text
+      key: email
+      value: regisha234@gmail.com
+      description: ""
+      disabled: false
+    - type: text
+      key: address
+      value: nayabazar
+      description: ""
+      disabled: false
+    - type: text
+      key: experience
+      value: "2"
+      description: ""
+      disabled: false
+    - type: text
+      key: price
+      value: "200"
+      description: ""
+      disabled: false
+    - type: text
+      key: description
+      value: Professional plumbing service
+      description: ""
+      disabled: false
+    - type: text
+      key: availability
+      value: Unavailable
+      description: ""
+      disabled: false
+    - type: file
+      key: image
+      src:
+        - /C:/Users/ACER/OneDrive/Desktop/Photos/regisha.png
+      description: ""
+      disabled: false
+order: 4156998833262624

@@ -1,0 +1,23 @@
+$kind: http-request
+url: http://localhost:9005/painting/6a9fd5b1a0a735a8e8dc207d
+method: PUT
+body:
+  type: json
+  content: "{\r
+
+    \  \"name\": \"Kathmandu Premium Painters\",\r
+
+    \  \"phone\": \"9801234568\",\r
+
+    \  \"email\": \"kathmandupremiumpainters@gmail.com\",\r
+
+    \  \"address\": \"Lazimpat, Kathmandu\",\r
+
+    \  \"experience\": 14,\r
+
+    \  \"description\": \"Professional interior and exterior painting service for houses, apartments, offices and commercial buildings with premium finishing.\",\r
+
+    \  \"availability\": \"Busy\"\r
+
+    }"
+order: 4464554214799541

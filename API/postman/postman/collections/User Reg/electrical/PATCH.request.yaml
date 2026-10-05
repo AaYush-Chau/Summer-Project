@@ -1,0 +1,15 @@
+$kind: http-request
+url: http://localhost:9005/electrical/6a9fcde15dfafadc821de380
+method: PATCH
+body:
+  type: json
+  content: "{\r
+
+    \    \"name\":\"siddharth\",\r
+
+    \     \"phone\": \"9867890123\",\r
+
+    \  \"availability\": \"Busy\"\r
+
+    }"
+order: 1395774207648600

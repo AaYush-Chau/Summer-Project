@@ -1,0 +1,28 @@
+$kind: http-request
+description: ""
+url: http://localhost:9005/auth/register
+method: POST
+body:
+  type: formdata
+  content:
+    - type: text
+      key: fullname
+      value: Aayush Chaudhary
+      description: ""
+      disabled: false
+    - type: text
+      key: email
+      value: aayushchaudhary260@gmail.com
+      description: ""
+      disabled: false
+    - type: text
+      key: password
+      value: Aayush@123
+      description: ""
+      disabled: false
+    - type: text
+      key: confirmPassword
+      value: Aayush@123
+      description: ""
+      disabled: false
+order: 1788514559860

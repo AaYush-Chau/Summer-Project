@@ -1,0 +1,4 @@
+$kind: http-request
+url: http://localhost:9005/painting/6a9fd5b1a0a735a8e8dc207d
+method: DELETE
+order: 4502344856811577

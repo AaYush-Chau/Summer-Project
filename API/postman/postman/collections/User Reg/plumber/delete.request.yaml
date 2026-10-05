@@ -1,0 +1,4 @@
+$kind: http-request
+url: http://localhost:9005/plumber/6a9fc9e2027a6d8b44cfdd06
+method: DELETE
+order: 4003014961792012

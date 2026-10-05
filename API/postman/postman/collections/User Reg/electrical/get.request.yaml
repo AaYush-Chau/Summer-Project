@@ -1,0 +1,4 @@
+$kind: http-request
+url: http://localhost:9005/electrical
+method: GET
+order: 1788857525177

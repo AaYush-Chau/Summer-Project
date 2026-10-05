@@ -1,0 +1,13 @@
+$kind: http-request
+url: http://localhost:9005/painting/6a9fd5b1a0a735a8e8dc207d
+method: PATCH
+body:
+  type: json
+  content: "{\r
+
+    \  \"name\": \"Pokahara Premium Painters\",\r
+
+    \  \"phone\": \"9801234567\"\r
+
+    }"
+order: 4501979949806006

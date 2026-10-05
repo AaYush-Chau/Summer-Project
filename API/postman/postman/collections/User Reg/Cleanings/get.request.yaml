@@ -1,0 +1,4 @@
+$kind: http-request
+url: http://localhost:9005/cleaning
+method: GET
+order: 3737827194102226

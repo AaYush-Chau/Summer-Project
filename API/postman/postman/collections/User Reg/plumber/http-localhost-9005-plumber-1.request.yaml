@@ -1,0 +1,15 @@
+$kind: http-request
+name: http://localhost:9005/plumber
+description: ""
+url: http://localhost:9005/plumber/6a9fc9e2027a6d8b44cfdd06
+method: PATCH
+body:
+  type: json
+  content: "{\r
+
+    \  \"phone\": \"9861234567\",\r
+
+    \  \"availability\": \"Available\"\r
+
+    }"
+order: 1475833303457713

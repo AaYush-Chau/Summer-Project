@@ -1,0 +1,4 @@
+$kind: http-request
+url: http://localhost:9005/provider/details
+method: GET
+order: 1789199181616

@@ -1,0 +1,53 @@
+$kind: http-request
+url: http://localhost:9005/painting
+method: POST
+body:
+  type: formdata
+  content:
+    - type: text
+      key: name
+      value: Ishan Poudel
+      description: ""
+      disabled: false
+    - type: text
+      key: phone
+      value: "98435361276"
+      description: ""
+      disabled: false
+    - type: text
+      key: email
+      value: ishan2@gmail.com
+      description: ""
+      disabled: false
+    - type: text
+      key: address
+      value: machapokhari
+      description: ""
+      disabled: false
+    - type: text
+      key: experience
+      value: "4"
+      description: ""
+      disabled: false
+    - type: text
+      key: price
+      value: "300"
+      description: ""
+      disabled: false
+    - type: text
+      key: description
+      value: Professional painter
+      description: ""
+      disabled: false
+    - type: file
+      key: image
+      src:
+        - /C:/Users/ACER/OneDrive/Desktop/Photos/Ishan.jpg
+      description: ""
+      disabled: false
+    - type: text
+      key: availability
+      value: Available
+      description: ""
+      disabled: false
+order: 3960621271947844
