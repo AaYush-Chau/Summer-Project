@@ -72,7 +72,7 @@ const TRENDING = [
 const TESTIMONIALS = [
   {
     name: "Aarav Sharma",
-    text: "GharSewa helped me find a reliable plumber quickly. The service was excellent.",
+    text: "SewaKhoj helped me find a reliable plumber quickly. The service was excellent.",
     rating: 5,
     image: "",
   },
@@ -529,7 +529,7 @@ function BecomeAPro() {
               "mx-auto mt-4 max-w-lg text-[#F7F4EE]/80 md:mx-0"
             )}
           >
-            Join GharSewa, build your professional profile, and connect with
+            Join SewaKhoj, build your professional profile, and connect with
             customers looking for trusted services near them.
           </p>
 
@@ -538,7 +538,7 @@ function BecomeAPro() {
               to="/register"
               className="group inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#F26B5E] to-[#F08454] px-6 py-3 font-semibold text-white shadow-lg shadow-[#F26B5E]/20 transition-all duration-300 hover:-translate-y-0.5 hover:brightness-110 hover:shadow-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E3A73A] focus-visible:ring-offset-2 focus-visible:ring-offset-[#16233B] motion-reduce:transition-none motion-reduce:hover:translate-y-0"
             >
-              Become a GharSewa Pro
+              Become a SewaKhoj Pro
               <ArrowRight
                 size={18}
                 className="transition-transform duration-300 group-hover:translate-x-1 motion-reduce:transition-none motion-reduce:group-hover:translate-x-0"
@@ -861,7 +861,7 @@ function PhoneMockup() {
 
         <div className="px-3 pt-6">
           <p className="text-sm font-extrabold tracking-tight text-[#16233B]">
-            Ghar<span className="text-[#E3A73A]">Sewa</span>
+            Sewa<span className="text-[#E3A73A]">Khoj</span>
           </p>
 
           <div className="mt-3 flex items-center gap-1.5 rounded-lg bg-[#F7F4EE] px-2 py-1.5 text-[10px] text-gray-400">

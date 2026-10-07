@@ -16,7 +16,7 @@ export default function Footer() {
           {/* Brand */}
           <div>
             <Link to="/" className="text-2xl font-bold">
-              Ghar<span className="text-[#E3A73A]">Sewa</span>
+              Sewa<span className="text-[#E3A73A]">Khoj</span>
             </Link>
 
             <p className="text-gray-300 text-sm leading-6 mt-4">
@@ -90,7 +90,7 @@ export default function Footer() {
 
               <p className="flex items-center gap-2">
                 <Mail size={16} />
-                support@gharsewa.com
+                support@sewakhoj.com
               </p>
             </div>
           </div>
@@ -98,7 +98,7 @@ export default function Footer() {
 
         {/* Bottom */}
         <div className="border-t border-white/10 mt-10 pt-6 flex flex-col sm:flex-row justify-between gap-3 text-sm text-gray-400">
-          <p>© 2026 GharSewa. All rights reserved.</p>
+          <p>© 2026 SewaKhoj. All rights reserved.</p>
 
           <div className="flex gap-5">
             <a href="#" className="hover:text-white">
