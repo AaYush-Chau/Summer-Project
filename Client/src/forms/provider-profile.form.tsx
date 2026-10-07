@@ -122,6 +122,7 @@ const SERVICE_VALUES = ["plumber", "electrician", "cleaner", "painter"];
 const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/jpg"];
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MIN_AGE = 18;
+const MIN_DOB_YEARS = 100; // reasonable lower bound for the date picker
 const MAX_EXPERIENCE = 50;
 const MIN_PRICE = 1;
 const MAX_PRICE = 1_000_000;
@@ -130,11 +131,28 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
-const todayString = () => {
+/**
+ * Maximum selectable DOB — exactly MIN_AGE years before today.
+ * Never hardcoded; recomputed on every render so it stays accurate.
+ * Example: on 2026-10-07 → "2008-10-07".
+ */
+const getMaxDob = () => {
   const now = new Date();
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(
+  // JS Date normalizes overflow (e.g. Feb 29 in a non-leap year).
+  const maxDate = new Date(
+    now.getFullYear() - MIN_AGE,
+    now.getMonth(),
     now.getDate()
+  );
+  return `${maxDate.getFullYear()}-${pad(maxDate.getMonth() + 1)}-${pad(
+    maxDate.getDate()
   )}`;
+};
+
+/** Reasonable historical floor (avoid absurd far-past dates). */
+const getMinDob = () => {
+  const now = new Date();
+  return `${now.getFullYear() - MIN_DOB_YEARS}-01-01`;
 };
 
 const validateEmail = (value: string) => {
@@ -156,10 +174,10 @@ const validateDob = (value: string) => {
 
   if (birth > today) return "Date of birth cannot be in the future.";
 
-  // Date the person turns 18 — computed from today, never hardcoded.
+  // The date the person turns MIN_AGE, derived from their actual birth date.
   const eighteenth = new Date(y + MIN_AGE, m - 1, d);
   if (eighteenth > today)
-    return "You must be at least 18 years old to create a professional profile.";
+    return "You must be at least 18 years old to register as a professional.";
 };
 
 const validateService = (value: string) => {
@@ -178,12 +196,13 @@ const validateExperience = (value: string) => {
 };
 
 const validatePrice = (value: string) => {
-  if (value.trim() === "") return "Please enter your starting price.";
-  const n = Number(value);
+  const trimmed = value.trim();
+  if (trimmed === "") return "Please enter your price per hour.";
+  const n = Number(trimmed);
   if (Number.isNaN(n) || !Number.isFinite(n))
-    return "Please enter a valid price.";
-  if (n < MIN_PRICE) return "Price must be greater than 0.";
-  if (n > MAX_PRICE) return "Please enter a reasonable starting price.";
+    return "Please enter a valid hourly price.";
+  if (n < MIN_PRICE) return "Price per hour must be greater than 0.";
+  if (n > MAX_PRICE) return "Please enter a reasonable hourly price.";
 };
 
 const validateImage = (file: File | null) => {
@@ -201,7 +220,7 @@ const inputBase =
   "w-full h-12 pl-11 pr-11 rounded-xl border text-sm text-[#16233B] placeholder:text-gray-400 outline-none transition-all duration-200 focus:ring-4";
 
 const inputOk =
-  "border-gray-200 bg-white hover:border-gray-300 focus:border-[#16233B] focus:bg-[#FBFAF7] focus:ring-[#16233B]/10";
+  "border-gray-200 bg-white hover:border-gray-300 focus:border-[#E3A73A] focus:bg-[#FBFAF7] focus:ring-[#E3A73A]/15";
 
 const inputBad =
   "border-red-300 bg-red-50/60 hover:border-red-400 focus:border-red-500 focus:ring-red-500/10";
@@ -241,8 +260,7 @@ export const ProviderProfileForm = () => {
   const [service, setService] = useState("plumber");
   const [experience, setExperience] = useState("");
   const [price, setPrice] = useState("");
-  const [profileImage, setProfileImage] =
-    useState<File | null>(null);
+  const [profileImage, setProfileImage] = useState<File | null>(null);
 
   // Validation UI state (client-side only)
   const [touched, setTouched] = useState<
@@ -254,7 +272,6 @@ export const ProviderProfileForm = () => {
 
   const { mutate, isPending, isError, error } = useMutation({
     mutationFn: createProviderProfile,
-
     onSuccess: () => {
       navigate("/professional/dashboard");
     },
@@ -337,6 +354,10 @@ export const ProviderProfileForm = () => {
   const experienceError = shown("experience");
   const priceError = shown("price");
   const imageError = shown("profileImage");
+
+  // Max/min for the DOB input, dynamically recomputed each render.
+  const maxDob = getMaxDob();
+  const minDob = getMinDob();
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#F7F4EE] px-4 py-8 sm:py-14">
@@ -447,9 +468,7 @@ export const ProviderProfileForm = () => {
                 id="email"
                 type="email"
                 value={email}
-                onChange={(event) =>
-                  setEmail(event.target.value)
-                }
+                onChange={(event) => setEmail(event.target.value)}
                 onBlur={() => touch("email")}
                 placeholder="Enter your professional email"
                 required
@@ -459,9 +478,7 @@ export const ProviderProfileForm = () => {
                   emailError ? inputBad : inputOk
                 }`}
               />
-              {isValidShown("email", email.trim() !== "") && (
-                <ValidTick />
-              )}
+              {isValidShown("email", email.trim() !== "") && <ValidTick />}
             </div>
             {emailError && (
               <FieldError id="email-error" message={emailError} />
@@ -486,10 +503,9 @@ export const ProviderProfileForm = () => {
                   id="dob"
                   type="date"
                   value={dob}
-                  max={todayString()}
-                  onChange={(event) =>
-                    setDob(event.target.value)
-                  }
+                  min={minDob}
+                  max={maxDob}
+                  onChange={(event) => setDob(event.target.value)}
                   onBlur={() => touch("dob")}
                   required
                   aria-invalid={!!dobError}
@@ -503,7 +519,8 @@ export const ProviderProfileForm = () => {
                 <FieldError id="dob-error" message={dobError} />
               ) : (
                 <p id="dob-help" className={helperClass}>
-                  Used only for professional profile verification.
+                  You must be at least 18 years old to register as a
+                  professional.
                 </p>
               )}
             </div>
@@ -515,22 +532,15 @@ export const ProviderProfileForm = () => {
 
               <div className="group relative">
                 <WrenchIcon
-                  className={`${leftIconClass} ${iconTone(
-                    !!serviceError
-                  )}`}
+                  className={`${leftIconClass} ${iconTone(!!serviceError)}`}
                 />
                 <select
                   id="service"
                   value={service}
-                  onChange={(event) =>
-                    setService(event.target.value)
-                  }
+                  onChange={(event) => setService(event.target.value)}
                   onBlur={() => touch("service")}
                   aria-invalid={!!serviceError}
-                  aria-describedby={describedBy(
-                    "service",
-                    "service-help"
-                  )}
+                  aria-describedby={describedBy("service", "service-help")}
                   className={`${inputBase} cursor-pointer appearance-none ${
                     serviceError ? inputBad : inputOk
                   }`}
@@ -552,7 +562,7 @@ export const ProviderProfileForm = () => {
             </div>
           </div>
 
-          {/* Experience + Price */}
+          {/* Experience + Price Per Hour */}
           <div
             className="gs-step grid gap-6 sm:grid-cols-2"
             style={{ animationDelay: "0.36s" }}
@@ -573,9 +583,7 @@ export const ProviderProfileForm = () => {
                   type="number"
                   min="0"
                   value={experience}
-                  onChange={(event) =>
-                    setExperience(event.target.value)
-                  }
+                  onChange={(event) => setExperience(event.target.value)}
                   onBlur={() => touch("experience")}
                   placeholder="e.g. 5"
                   required
@@ -604,34 +612,39 @@ export const ProviderProfileForm = () => {
               )}
             </div>
 
+            {/* ========== PRICE PER HOUR (modern UI) ========== */}
             <div>
               <label htmlFor="price" className={labelClass}>
-                Starting Price
+                Price Per Hour
               </label>
 
               <div className="group relative">
                 <WalletIcon
-                  className={`${leftIconClass} ${iconTone(
-                    !!priceError
-                  )}`}
+                  className={`${leftIconClass} ${iconTone(!!priceError)}`}
                 />
-                <span className="pointer-events-none absolute left-11 top-1/2 -translate-y-1/2 rounded-md bg-[#16233B]/5 px-1.5 py-0.5 text-[11px] font-bold text-[#16233B]">
+
+                {/* Compact NPR badge inside the input */}
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-11 top-1/2 -translate-y-1/2 rounded-md border border-[#16233B]/10 bg-[#F7F4EE] px-1.5 py-0.5 text-[11px] font-bold tracking-wide text-[#16233B]"
+                >
                   NPR
                 </span>
+
                 <input
                   id="price"
                   type="number"
                   min="0"
+                  step="1"
+                  inputMode="numeric"
                   value={price}
-                  onChange={(event) =>
-                    setPrice(event.target.value)
-                  }
+                  onChange={(event) => setPrice(event.target.value)}
                   onBlur={() => touch("price")}
                   placeholder="e.g. 1000"
                   required
                   aria-invalid={!!priceError}
                   aria-describedby={describedBy("price", "price-help")}
-                  className={`gs-no-spin ${inputBase} !pl-[5.5rem] ${
+                  className={`gs-no-spin ${inputBase} !pl-[5.5rem] font-medium tabular-nums ${
                     priceError ? inputBad : inputOk
                   }`}
                 />
@@ -643,7 +656,7 @@ export const ProviderProfileForm = () => {
                 <FieldError id="price-error" message={priceError} />
               ) : (
                 <p id="price-help" className={helperClass}>
-                  You can discuss the final price with customers.
+                  Set your hourly service rate in Nepalese Rupees.
                 </p>
               )}
             </div>
@@ -662,9 +675,7 @@ export const ProviderProfileForm = () => {
                 type="file"
                 accept="image/png,image/jpeg,image/jpg"
                 onChange={(event) => {
-                  setProfileImage(
-                    event.target.files?.[0] || null
-                  );
+                  setProfileImage(event.target.files?.[0] || null);
                   touch("profileImage");
                 }}
                 aria-invalid={!!imageError}

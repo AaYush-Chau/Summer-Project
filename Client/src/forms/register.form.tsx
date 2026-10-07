@@ -505,25 +505,7 @@ export const RegisterForm = () => {
                 "group flex cursor-pointer items-start gap-2.5 text-sm text-gray-500"
               )}
             >
-              <input type="checkbox" className="peer sr-only" />
-
-              <span className="mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-md border border-gray-300 bg-white text-[#E3A73A] transition-all duration-200 group-hover:border-[#16233B] peer-checked:border-[#16233B] peer-checked:bg-[#16233B] peer-checked:[&>svg]:opacity-100 peer-focus-visible:ring-2 peer-focus-visible:ring-[#16233B]/30">
-                <Check
-                  size={13}
-                  strokeWidth={3}
-                  className="opacity-0 transition-opacity duration-200"
-                />
-              </span>
-
-              <span>
-                I agree to{" "}
-                <Link
-                  to="#"
-                  className="font-medium text-[#16233B] transition-colors duration-200 hover:text-[#F26B5E] hover:underline"
-                >
-                  Terms & Conditions
-                </Link>
-              </span>
+              
             </label>
 
             {/* REGISTER BUTTON */}

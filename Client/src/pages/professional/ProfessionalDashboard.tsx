@@ -1,5 +1,5 @@
-
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   LogOut,
@@ -12,23 +12,48 @@ import {
   Check,
   X,
   CheckCircle,
+  ArrowRight,
+  RefreshCw,
+  ClipboardList,
+  AlertCircle,
+  Loader2,
+  Phone,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
 import { getProviderProfile } from "../../api/provider.api";
 import {
   getProviderBookings,
   updateBookingStatus,
 } from "../../api/booking.api";
+import { resolveAssetUrl } from "../../api/user.api";
+
+/* ==========================================================
+   TYPES
+   ========================================================== */
+
+type Availability = "Available" | "Busy" | "Unavailable";
+type BookingStatus =
+  | "Pending"
+  | "Accepted"
+  | "Rejected"
+  | "Completed"
+  | "Cancelled";
 
 type ProviderProfile = {
+  name?: string;
+  username?: string;
+  fullname?: string;
   email: string;
   dob: string;
   service: string;
   experience: number;
   price: number;
-  availability: "Available" | "Busy" | "Unavailable";
-  profileImage?: {
-    filename?: string;
+  availability: Availability;
+  profileImage?: { filename?: string };
+  userId?: {
+    fullname?: string;
+    phone?: string;
   };
 };
 
@@ -40,514 +65,987 @@ type Booking = {
   address: string;
   description: string;
   price: number;
-  status:
-    | "Pending"
-    | "Accepted"
-    | "Rejected"
-    | "Completed"
-    | "Cancelled";
+  status: BookingStatus;
   customerId?: {
     fullname: string;
     phone: string;
   };
 };
 
+/* ==========================================================
+   STYLE MAPS
+   ========================================================== */
+
+const AVAILABILITY_STYLES: Record<
+  Availability,
+  { badge: string; dot: string }
+> = {
+  Available: {
+    badge: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    dot: "bg-emerald-500",
+  },
+  Busy: {
+    badge: "border-amber-200 bg-amber-50 text-amber-700",
+    dot: "bg-amber-500",
+  },
+  Unavailable: {
+    badge: "border-red-200 bg-red-50 text-red-700",
+    dot: "bg-red-500",
+  },
+};
+
+const getStatusStyles = (
+  status: BookingStatus
+): { badge: string; dot: string; label: string } => {
+  switch (status) {
+    case "Pending":
+      return {
+        badge: "border-amber-200 bg-amber-50 text-amber-700",
+        dot: "bg-amber-500",
+        label: "Pending",
+      };
+    case "Accepted":
+      return {
+        badge: "border-emerald-200 bg-emerald-50 text-emerald-700",
+        dot: "bg-emerald-500",
+        label: "Accepted",
+      };
+    case "Rejected":
+      return {
+        badge: "border-red-200 bg-red-50 text-red-700",
+        dot: "bg-red-500",
+        label: "Rejected",
+      };
+    case "Completed":
+      return {
+        badge: "border-blue-200 bg-blue-50 text-blue-700",
+        dot: "bg-blue-500",
+        label: "Completed",
+      };
+    case "Cancelled":
+    default:
+      return {
+        badge: "border-gray-200 bg-gray-100 text-gray-700",
+        dot: "bg-gray-500",
+        label: "Cancelled",
+      };
+  }
+};
+
+const SERVICE_LABELS: Record<string, string> = {
+  plumber: "Plumber",
+  electrician: "Electrician",
+  cleaner: "Cleaner",
+  painter: "Painter",
+};
+
+/* ==========================================================
+   HELPERS
+   ========================================================== */
+
+const capitalize = (value: string): string =>
+  value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
+
+const humanService = (service?: string): string => {
+  if (!service) return "Service";
+  return SERVICE_LABELS[service.toLowerCase()] ?? capitalize(service);
+};
+
+const formatBookingDate = (date: string): string => {
+  if (!date) return "—";
+  const parsed = new Date(date);
+  if (Number.isNaN(parsed.getTime())) return date;
+  try {
+    return parsed.toLocaleDateString("en-NP", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  } catch {
+    return parsed.toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  }
+};
+
+const formatBookingTime = (time: string): string => {
+  if (!time) return "—";
+  // Already 12-hour formatted
+  if (/[ap]m/i.test(time)) return time.trim().toUpperCase();
+  const [hourStr, minuteStr] = time.split(":");
+  const hour = Number(hourStr);
+  const minute = Number(minuteStr);
+  if (Number.isNaN(hour) || Number.isNaN(minute)) return time;
+  const period = hour >= 12 ? "PM" : "AM";
+  const h12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${h12}:${String(minute).padStart(2, "0")} ${period}`;
+};
+
+const formatNPR = (amount: number): string => {
+  if (!Number.isFinite(amount)) return "NPR 0";
+  try {
+    return `NPR ${amount.toLocaleString("en-NP")}`;
+  } catch {
+    return `NPR ${amount.toLocaleString()}`;
+  }
+};
+
+const initialsFrom = (name: string): string => {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "GS";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+};
+
+/* ==========================================================
+   PRESENTATIONAL SUBCOMPONENTS
+   ========================================================== */
+
+const StatusBadge = ({ status }: { status: BookingStatus }) => {
+  const style = getStatusStyles(status);
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${style.badge}`}
+    >
+      <span
+        className={`h-1.5 w-1.5 rounded-full ${style.dot}`}
+        aria-hidden="true"
+      />
+      {style.label}
+    </span>
+  );
+};
+
+const AvailabilityBadge = ({
+  availability,
+}: {
+  availability: Availability;
+}) => {
+  const style =
+    AVAILABILITY_STYLES[availability] ?? AVAILABILITY_STYLES.Unavailable;
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${style.badge}`}
+    >
+      <span
+        className={`h-1.5 w-1.5 rounded-full ${style.dot}`}
+        aria-hidden="true"
+      />
+      {availability}
+    </span>
+  );
+};
+
+const SkeletonBlock = ({ className = "" }: { className?: string }) => (
+  <div className={`animate-pulse rounded-xl bg-gray-200/70 ${className}`} />
+);
+
+type StatCardProps = {
+  Icon: LucideIcon;
+  label: string;
+  value: ReactNode;
+  tone?: "navy" | "gold" | "coral";
+};
+
+const StatCard = ({ Icon, label, value, tone = "navy" }: StatCardProps) => {
+  const tones = {
+    navy: "bg-[#16233B]/10 text-[#16233B]",
+    gold: "bg-[#E3A73A]/15 text-[#B9801A]",
+    coral: "bg-[#F26B5E]/10 text-[#D4493C]",
+  } as const;
+
+  return (
+    <div className="group rounded-2xl border border-gray-200 bg-white p-5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-gray-300 hover:shadow-md motion-reduce:transition-none motion-reduce:hover:translate-y-0">
+      <div
+        className={`flex h-11 w-11 items-center justify-center rounded-xl ${tones[tone]}`}
+      >
+        <Icon size={20} />
+      </div>
+      <p className="mt-4 text-[11px] font-bold uppercase tracking-wider text-gray-500">
+        {label}
+      </p>
+      <p className="mt-1 text-xl font-bold text-[#16233B]">{value}</p>
+    </div>
+  );
+};
+
+type MiniStatProps = {
+  label: string;
+  value: number;
+  accent: "navy" | "amber" | "emerald" | "blue";
+};
+
+const MiniStat = ({ label, value, accent }: MiniStatProps) => {
+  const accents = {
+    navy: "text-[#16233B]",
+    amber: "text-amber-600",
+    emerald: "text-emerald-600",
+    blue: "text-blue-600",
+  } as const;
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+        {label}
+      </p>
+      <p className={`mt-1 text-2xl font-bold tabular-nums ${accents[accent]}`}>
+        {value}
+      </p>
+    </div>
+  );
+};
+
+const BookingDetail = ({
+  Icon,
+  label,
+  value,
+}: {
+  Icon: LucideIcon;
+  label: string;
+  value: string;
+}) => (
+  <div>
+    <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+      <Icon size={12} className="text-gray-400" aria-hidden="true" />
+      {label}
+    </p>
+    <p className="mt-1 text-sm font-semibold text-[#16233B]">{value}</p>
+  </div>
+);
+
+/* ==========================================================
+   SKELETONS
+   ========================================================== */
+
+const DashboardSkeleton = () => (
+  <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
+    {/* Welcome */}
+    <div className="space-y-3">
+      <SkeletonBlock className="h-8 w-64" />
+      <SkeletonBlock className="h-4 w-80 max-w-full" />
+    </div>
+
+    {/* Profile */}
+    <div className="mt-8 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+      <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
+        <SkeletonBlock className="h-20 w-20 !rounded-full" />
+        <div className="flex-1 space-y-3">
+          <SkeletonBlock className="h-5 w-40" />
+          <SkeletonBlock className="h-4 w-56" />
+          <div className="flex gap-2">
+            <SkeletonBlock className="h-6 w-24 !rounded-full" />
+            <SkeletonBlock className="h-6 w-24 !rounded-full" />
+          </div>
+        </div>
+        <SkeletonBlock className="h-10 w-32" />
+      </div>
+    </div>
+
+    {/* Stats */}
+    <div className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+      {[0, 1, 2].map((i) => (
+        <div
+          key={i}
+          className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"
+        >
+          <SkeletonBlock className="h-11 w-11" />
+          <SkeletonBlock className="mt-4 h-3 w-20" />
+          <SkeletonBlock className="mt-2 h-5 w-28" />
+        </div>
+      ))}
+    </div>
+
+    {/* Booking section */}
+    <div className="mt-10 space-y-4">
+      <SkeletonBlock className="h-6 w-48" />
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {[0, 1, 2, 3].map((i) => (
+          <SkeletonBlock key={i} className="h-20" />
+        ))}
+      </div>
+      <div className="space-y-4">
+        {[0, 1].map((i) => (
+          <div
+            key={i}
+            className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"
+          >
+            <div className="flex items-center justify-between">
+              <SkeletonBlock className="h-5 w-40" />
+              <SkeletonBlock className="h-6 w-20 !rounded-full" />
+            </div>
+            <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <SkeletonBlock className="h-8" />
+              <SkeletonBlock className="h-8" />
+              <SkeletonBlock className="h-8" />
+            </div>
+            <SkeletonBlock className="mt-5 h-16" />
+          </div>
+        ))}
+      </div>
+    </div>
+  </div>
+);
+
+/* ==========================================================
+   MAIN COMPONENT
+   ========================================================== */
+
 export const ProfessionalDashboardPage = () => {
   const navigate = useNavigate();
 
-  const [profile, setProfile] =
-    useState<ProviderProfile | null>(null);
-
+  const [profile, setProfile] = useState<ProviderProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [profileError, setProfileError] = useState("");
 
-  const [bookings, setBookings] =
-    useState<Booking[]>([]);
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [bookingLoading, setBookingLoading] = useState(true);
+  const [bookingError, setBookingError] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
 
-  const [bookingLoading, setBookingLoading] =
-    useState(true);
+  const [statusUpdating, setStatusUpdating] = useState<string | null>(null);
+
+  /* -------------------- LOADERS -------------------- */
+
+  const loadProfile = async () => {
+    setLoading(true);
+    setProfileError("");
+    try {
+      const response = await getProviderProfile();
+      setProfile(response?.data ?? null);
+    } catch (error) {
+      console.error("Failed to load provider profile:", error);
+      setProfileError("Unable to load your dashboard");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadBookings = async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true);
+    else setBookingLoading(true);
+    setBookingError("");
+    try {
+      const response = await getProviderBookings();
+      setBookings(response?.data || []);
+    } catch (error) {
+      console.error("Failed to load booking requests:", error);
+      setBookingError("Unable to load booking requests");
+    } finally {
+      if (isRefresh) setRefreshing(false);
+      else setBookingLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const loadProfile = async () => {
-      try {
-        const response = await getProviderProfile();
-
-        setProfile(response?.data);
-      } catch (error) {
-        console.error(
-          "Failed to load provider profile:",
-          error
-        );
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    const loadBookings = async () => {
-      try {
-        const response = await getProviderBookings();
-
-        setBookings(response?.data || []);
-      } catch (error) {
-        console.error(
-          "Failed to load booking requests:",
-          error
-        );
-      } finally {
-        setBookingLoading(false);
-      }
-    };
-
     loadProfile();
     loadBookings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const handleRefreshBookings = () => loadBookings(true);
+
+  const handleRetryAll = () => {
+    if (!profile) loadProfile();
+    loadBookings(!profile);
+  };
+
+  /* -------------------- ACTIONS -------------------- */
 
   const handleBookingStatus = async (
     bookingId: string,
-    status:
-      | "Accepted"
-      | "Rejected"
-      | "Completed"
+    status: "Accepted" | "Rejected" | "Completed"
   ) => {
+    setStatusUpdating(bookingId);
     try {
-      await updateBookingStatus(
-        bookingId,
-        status
-      );
-
-      setBookings((previousBookings) =>
-        previousBookings.map((booking) =>
-          booking._id === bookingId
-            ? {
-                ...booking,
-                status,
-              }
-            : booking
+      await updateBookingStatus(bookingId, status);
+      setBookings((prev) =>
+        prev.map((booking) =>
+          booking._id === bookingId ? { ...booking, status } : booking
         )
       );
-    } catch (error: any) {
-      console.error(
-        "Failed to update booking status:",
-        error
-      );
-
-      alert(
-        error?.response?.data?.message ||
-          "Failed to update booking status. Please try again."
-      );
+    } catch (error) {
+      console.error("Failed to update booking status:", error);
+    } finally {
+      setStatusUpdating(null);
     }
   };
 
   const handleLogout = () => {
     localStorage.removeItem("access_token");
     localStorage.removeItem("user");
-
     navigate("/login");
   };
 
+  /* -------------------- DERIVED -------------------- */
+
+  const providerName =
+    profile?.name ||
+    profile?.username ||
+    profile?.fullname ||
+    profile?.userId?.fullname ||
+    "Service Professional";
+
+  const profileImageSrc = resolveAssetUrl(
+    profile?.profileImage?.filename
+      ? `uploads/images/provider/${profile.profileImage.filename}`
+      : null
+  );
+
+  const initials = initialsFrom(providerName);
+
+  const bookingStats = useMemo(
+    () => ({
+      total: bookings.length,
+      pending: bookings.filter((b) => b.status === "Pending").length,
+      accepted: bookings.filter((b) => b.status === "Accepted").length,
+      completed: bookings.filter((b) => b.status === "Completed").length,
+    }),
+    [bookings]
+  );
+
+  /* ==================== RENDER: LOADING ==================== */
+
   if (loading) {
     return (
-      <main className="min-h-screen bg-[#F7F4EE] flex items-center justify-center">
-        <p className="text-[#16233B] font-medium">
-          Loading dashboard...
-        </p>
+      <main className="min-h-screen bg-[#F7F4EE]">
+        <DashboardHeader
+          providerName={undefined}
+          profileImageSrc={null}
+          initials=""
+          onLogout={handleLogout}
+        />
+        <DashboardSkeleton />
       </main>
     );
   }
 
+  /* ==================== RENDER: PROFILE ERROR ==================== */
+
+  if (profileError && !profile) {
+    return (
+      <main className="min-h-screen bg-[#F7F4EE]">
+        <DashboardHeader
+          providerName={undefined}
+          profileImageSrc={null}
+          initials=""
+          onLogout={handleLogout}
+        />
+        <div className="mx-auto max-w-xl px-4 py-16 sm:px-6">
+          <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center shadow-sm">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-red-50 text-red-500">
+              <AlertCircle size={24} />
+            </div>
+            <h1 className="mt-4 text-xl font-bold text-[#16233B]">
+              Unable to load your dashboard
+            </h1>
+            <p className="mt-1.5 text-sm text-gray-500">
+              Please check your connection and try again.
+            </p>
+            <button
+              type="button"
+              onClick={handleRetryAll}
+              className="group mt-5 inline-flex items-center justify-center gap-2 rounded-xl bg-[#16233B] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#F26B5E] hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-[#E3A73A] focus-visible:ring-offset-2 motion-reduce:transition-none"
+            >
+              <RefreshCw
+                size={15}
+                className="transition-transform duration-500 group-hover:rotate-180 motion-reduce:transition-none"
+              />
+              Try Again
+            </button>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  /* ==================== RENDER: MAIN ==================== */
+
   return (
     <main className="min-h-screen bg-[#F7F4EE]">
-      {/* Header */}
-      <header className="bg-[#16233B] text-white">
-        <div className="max-w-7xl mx-auto px-6 py-5 flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-bold">
-              NearPro
-            </h1>
+      <DashboardHeader
+        providerName={providerName}
+        profileImageSrc={profileImageSrc}
+        initials={initials}
+        onLogout={handleLogout}
+      />
 
-            <p className="text-sm text-gray-300">
-              Professional Dashboard
-            </p>
+      <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
+        {/* ============ WELCOME ============ */}
+        <section>
+          <h1 className="text-2xl font-bold text-[#16233B] sm:text-3xl">
+            Welcome back, {providerName} 👋
+          </h1>
+
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            {profile?.service && (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-[#16233B]">
+                <Briefcase size={12} className="text-gray-400" />
+                {humanService(profile.service)}
+              </span>
+            )}
+            <span className="text-gray-300" aria-hidden="true">
+              ·
+            </span>
+            {profile?.availability && (
+              <AvailabilityBadge availability={profile.availability} />
+            )}
           </div>
 
-          <button
-            onClick={handleLogout}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 transition"
-          >
-            <LogOut size={17} />
-            Logout
-          </button>
-        </div>
-      </header>
-
-      {/* Main */}
-      <div className="max-w-7xl mx-auto px-6 py-10">
-        {/* Welcome */}
-        <div className="mb-8">
-          <h2 className="text-3xl font-bold text-[#16233B]">
-            Welcome to your dashboard
-          </h2>
-
-          <p className="mt-2 text-gray-500">
-            Manage your professional profile and service
-            information.
+          <p className="mt-3 max-w-2xl text-sm text-gray-500">
+            Manage your services, bookings and professional profile.
           </p>
-        </div>
+        </section>
 
+        {/* ============ PROFILE OVERVIEW ============ */}
         {profile && (
-          <>
-            {/* Profile Card */}
-            <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-8">
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
-                {/* Profile information */}
-                <div className="flex items-center gap-5">
-                  <div className="w-20 h-20 rounded-full bg-[#E3A73A]/20 flex items-center justify-center overflow-hidden">
-                    {profile.profileImage?.filename ? (
+          <section className="mt-8">
+            <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+              <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+                {/* Avatar + name */}
+                <div className="flex min-w-0 flex-1 items-center gap-5">
+                  <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-full border-2 border-[#F7F4EE] bg-[#F7F4EE] shadow-sm sm:h-24 sm:w-24">
+                    {profileImageSrc ? (
                       <img
-                        src={`http://localhost:9005/assets/uploads/images/provider/${profile.profileImage.filename}`}
-                        alt="Profile"
-                        className="w-full h-full object-cover"
+                        src={profileImageSrc}
+                        alt={`${providerName} profile photo`}
+                        loading="lazy"
+                        className="h-full w-full object-cover object-center"
                       />
                     ) : (
-                      <User
-                        size={36}
-                        className="text-[#16233B]"
-                      />
+                      <div className="flex h-full w-full items-center justify-center bg-[#E3A73A]/15 text-[#16233B]">
+                        <User size={36} strokeWidth={1.6} />
+                      </div>
                     )}
                   </div>
 
-                  <div>
-                    <h3 className="text-xl font-bold text-[#16233B]">
-                      Professional Profile
-                    </h3>
-
-                    <p className="text-gray-500">
+                  <div className="min-w-0">
+                    <h2 className="truncate text-lg font-bold text-[#16233B] sm:text-xl">
+                      {providerName}
+                    </h2>
+                    <p className="mt-0.5 truncate text-sm text-gray-500">
                       {profile.email}
                     </p>
 
-                    <span className="inline-block mt-2 px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">
-                      {profile.availability}
-                    </span>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-[#F7F4EE]/70 px-2.5 py-1 text-[11px] font-semibold text-[#16233B]">
+                        <Briefcase size={12} className="text-gray-500" />
+                        {humanService(profile.service)}
+                      </span>
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-[#F7F4EE]/70 px-2.5 py-1 text-[11px] font-semibold text-[#16233B]">
+                        <Clock size={12} className="text-gray-500" />
+                        {profile.experience}{" "}
+                        {profile.experience === 1 ? "Year" : "Years"}
+                      </span>
+                      <AvailabilityBadge
+                        availability={profile.availability}
+                      />
+                    </div>
                   </div>
                 </div>
 
-                {/* Edit */}
+                
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* ============ DASHBOARD STATS ============ */}
+        {profile && (
+          <section className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            <StatCard
+              Icon={Briefcase}
+              tone="navy"
+              label="Service"
+              value={humanService(profile.service)}
+            />
+            <StatCard
+              Icon={Clock}
+              tone="gold"
+              label="Experience"
+              value={`${profile.experience} ${
+                profile.experience === 1 ? "Year" : "Years"
+              }`}
+            />
+            <StatCard
+              Icon={Banknote}
+              tone="coral"
+              label="Price Per Hour"
+              value={formatNPR(profile.price)}
+            />
+          </section>
+        )}
+
+        {/* ============ BOOKING REQUESTS ============ */}
+        <section className="mt-10">
+          {/* Section header */}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h2 className="text-xl font-bold text-[#16233B] sm:text-2xl">
+                Booking Requests
+              </h2>
+              <p className="mt-1 text-sm text-gray-500">
+                Manage customer service requests and upcoming jobs.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {!bookingLoading && bookings.length > 0 && (
+                <span className="inline-flex items-center rounded-full border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-[#16233B]">
+                  {bookings.length}{" "}
+                  {bookings.length === 1 ? "Request" : "Requests"}
+                </span>
+              )}
+
+              <button
+                type="button"
+                onClick={handleRefreshBookings}
+                disabled={refreshing || bookingLoading}
+                aria-label="Refresh booking requests"
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-[12px] font-semibold text-[#16233B] shadow-sm transition-all duration-200 hover:border-[#E3A73A] hover:bg-[#E3A73A]/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#E3A73A] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 motion-reduce:transition-none"
+              >
+                {refreshing ? (
+                  <Loader2 size={13} className="animate-spin" />
+                ) : (
+                  <RefreshCw size={13} />
+                )}
+                <span>{refreshing ? "Refreshing..." : "Refresh"}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Booking stats */}
+          {!bookingLoading && bookings.length > 0 && (
+            <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
+              <MiniStat
+                label="Total Requests"
+                value={bookingStats.total}
+                accent="navy"
+              />
+              <MiniStat
+                label="Pending"
+                value={bookingStats.pending}
+                accent="amber"
+              />
+              <MiniStat
+                label="Accepted"
+                value={bookingStats.accepted}
+                accent="emerald"
+              />
+              <MiniStat
+                label="Completed"
+                value={bookingStats.completed}
+                accent="blue"
+              />
+            </div>
+          )}
+
+          {/* List / states */}
+          <div className="mt-5">
+            {bookingLoading ? (
+              <div className="space-y-4">
+                {[0, 1].map((i) => (
+                  <div
+                    key={i}
+                    className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"
+                  >
+                    <div className="flex items-center justify-between">
+                      <SkeletonBlock className="h-5 w-40" />
+                      <SkeletonBlock className="h-6 w-20 !rounded-full" />
+                    </div>
+                    <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
+                      <SkeletonBlock className="h-8" />
+                      <SkeletonBlock className="h-8" />
+                      <SkeletonBlock className="h-8" />
+                    </div>
+                    <SkeletonBlock className="mt-5 h-16" />
+                  </div>
+                ))}
+              </div>
+            ) : bookingError ? (
+              <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center shadow-sm">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-red-50 text-red-500">
+                  <AlertCircle size={22} />
+                </div>
+                <h3 className="mt-4 text-base font-bold text-[#16233B]">
+                  {bookingError}
+                </h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  Please check your connection and try again.
+                </p>
                 <button
-                  onClick={() =>
-                    navigate("/professional/profile")
-                  }
-                  className="px-5 py-2.5 rounded-xl bg-[#16233B] text-white text-sm font-semibold hover:bg-[#F26B5E] transition"
+                  type="button"
+                  onClick={handleRefreshBookings}
+                  className="group mt-5 inline-flex items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-5 py-2.5 text-sm font-semibold text-[#16233B] shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-[#E3A73A] hover:bg-[#E3A73A]/5 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-[#E3A73A] focus-visible:ring-offset-2 motion-reduce:transition-none motion-reduce:hover:translate-y-0"
                 >
-                  Edit Profile
+                  <RefreshCw
+                    size={15}
+                    className="transition-transform duration-500 group-hover:rotate-180 motion-reduce:transition-none"
+                  />
+                  Try Again
                 </button>
               </div>
-            </div>
-
-            {/* Statistics */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              {/* Service */}
-              <div className="bg-white rounded-2xl border border-gray-200 p-6">
-                <div className="w-11 h-11 rounded-xl bg-blue-50 flex items-center justify-center mb-4">
-                  <Briefcase
-                    size={22}
-                    className="text-[#16233B]"
+            ) : bookings.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-gray-200 bg-white p-10 text-center shadow-sm">
+                <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-[#F7F4EE] text-[#16233B]">
+                  <ClipboardList size={26} strokeWidth={1.8} />
+                </div>
+                <h3 className="mt-5 text-base font-bold text-[#16233B]">
+                  No booking requests yet
+                </h3>
+                <p className="mx-auto mt-1.5 max-w-sm text-sm text-gray-500">
+                  When customers book your service, their requests will
+                  appear here.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {bookings.map((booking) => (
+                  <BookingCard
+                    key={booking._id}
+                    booking={booking}
+                    updating={statusUpdating === booking._id}
+                    onUpdate={(status) =>
+                      handleBookingStatus(booking._id, status)
+                    }
                   />
-                </div>
-
-                <p className="text-sm text-gray-500">
-                  Service
-                </p>
-
-                <h3 className="mt-1 text-xl font-bold text-[#16233B] capitalize">
-                  {profile.service}
-                </h3>
+                ))}
               </div>
-
-              {/* Experience */}
-              <div className="bg-white rounded-2xl border border-gray-200 p-6">
-                <div className="w-11 h-11 rounded-xl bg-yellow-50 flex items-center justify-center mb-4">
-                  <Clock
-                    size={22}
-                    className="text-[#16233B]"
-                  />
-                </div>
-
-                <p className="text-sm text-gray-500">
-                  Experience
-                </p>
-
-                <h3 className="mt-1 text-xl font-bold text-[#16233B]">
-                  {profile.experience} Years
-                </h3>
-              </div>
-
-              {/* Price */}
-              <div className="bg-white rounded-2xl border border-gray-200 p-6">
-                <div className="w-11 h-11 rounded-xl bg-green-50 flex items-center justify-center mb-4">
-                  <Banknote
-                    size={22}
-                    className="text-[#16233B]"
-                  />
-                </div>
-
-                <p className="text-sm text-gray-500">
-                  Starting Price
-                </p>
-
-                <h3 className="mt-1 text-xl font-bold text-[#16233B]">
-                  NPR {profile.price}
-                </h3>
-              </div>
-            </div>
-
-            {/* Booking Requests */}
-            <div className="mt-8">
-              <div className="mb-5">
-                <h2 className="text-2xl font-bold text-[#16233B]">
-                  Booking Requests
-                </h2>
-
-                <p className="mt-1 text-gray-500">
-                  View and manage service requests from
-                  customers.
-                </p>
-              </div>
-
-              {bookingLoading ? (
-                <div className="bg-white rounded-2xl border border-gray-200 p-6">
-                  <p className="text-gray-500">
-                    Loading booking requests...
-                  </p>
-                </div>
-              ) : bookings.length === 0 ? (
-                <div className="bg-white rounded-2xl border border-gray-200 p-8 text-center">
-                  <CalendarDays
-                    size={40}
-                    className="mx-auto text-gray-400"
-                  />
-
-                  <h3 className="mt-4 font-semibold text-[#16233B]">
-                    No booking requests
-                  </h3>
-
-                  <p className="mt-1 text-sm text-gray-500">
-                    Customer booking requests will appear
-                    here.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-5">
-                  {bookings.map((booking) => (
-                    <div
-                      key={booking._id}
-                      className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6"
-                    >
-                      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-5">
-                        {/* Customer */}
-                        <div>
-                          <h3 className="text-lg font-bold text-[#16233B]">
-                            {booking.customerId?.fullname ||
-                              "Customer"}
-                          </h3>
-
-                          <p className="text-sm text-gray-500 mt-1">
-                            {booking.customerId?.phone ||
-                              "Phone not available"}
-                          </p>
-
-                          <span
-                            className={`inline-block mt-3 px-3 py-1 rounded-full text-xs font-medium ${
-                              booking.status ===
-                              "Pending"
-                                ? "bg-yellow-100 text-yellow-700"
-                                : booking.status ===
-                                  "Accepted"
-                                ? "bg-green-100 text-green-700"
-                                : booking.status ===
-                                  "Rejected"
-                                ? "bg-red-100 text-red-700"
-                                : booking.status ===
-                                  "Completed"
-                                ? "bg-blue-100 text-blue-700"
-                                : "bg-gray-100 text-gray-700"
-                            }`}
-                          >
-                            {booking.status}
-                          </span>
-                        </div>
-
-                        {/* Booking Details */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 flex-1 lg:max-w-2xl">
-                          {/* Service */}
-                          <div className="flex items-center gap-2 text-sm text-gray-600">
-                            <Briefcase size={17} />
-
-                            <span className="capitalize">
-                              {booking.service}
-                            </span>
-                          </div>
-
-                          {/* Date */}
-                          <div className="flex items-center gap-2 text-sm text-gray-600">
-                            <CalendarDays size={17} />
-
-                            <span>
-                              {new Date(
-                                booking.bookingDate
-                              ).toLocaleDateString()}
-                            </span>
-                          </div>
-
-                          {/* Time */}
-                          <div className="flex items-center gap-2 text-sm text-gray-600">
-                            <Clock size={17} />
-
-                            <span>
-                              {booking.bookingTime}
-                            </span>
-                          </div>
-
-                          {/* Price */}
-                          <div className="flex items-center gap-2 text-sm text-gray-600">
-                            <Banknote size={17} />
-
-                            <span>
-                              NPR {booking.price}
-                            </span>
-                          </div>
-
-                          {/* Address */}
-                          <div className="flex items-start gap-2 text-sm text-gray-600 sm:col-span-2">
-                            <MapPin
-                              size={17}
-                              className="mt-0.5 shrink-0"
-                            />
-
-                            <span>
-                              {booking.address}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Requirement */}
-                      <div className="mt-5 border-t border-gray-100 pt-5">
-                        <p className="text-sm font-semibold text-[#16233B]">
-                          Customer Requirement
-                        </p>
-
-                        <p className="mt-2 text-sm text-gray-600">
-                          {booking.description}
-                        </p>
-                      </div>
-
-                      {/* Actions */}
-
-                      {/* Pending Booking */}
-                      {booking.status ===
-                        "Pending" && (
-                        <div className="mt-5 flex gap-3">
-                          <button
-                            onClick={() =>
-                              handleBookingStatus(
-                                booking._id,
-                                "Accepted"
-                              )
-                            }
-                            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-green-600 text-white text-sm font-semibold hover:bg-green-700 transition"
-                          >
-                            <Check size={17} />
-                            Accept
-                          </button>
-
-                          <button
-                            onClick={() =>
-                              handleBookingStatus(
-                                booking._id,
-                                "Rejected"
-                              )
-                            }
-                            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-red-500 text-white text-sm font-semibold hover:bg-red-600 transition"
-                          >
-                            <X size={17} />
-                            Reject
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Accepted Booking */}
-                      {booking.status ===
-                        "Accepted" && (
-                        <div className="mt-5">
-                          <button
-                            onClick={() =>
-                              handleBookingStatus(
-                                booking._id,
-                                "Completed"
-                              )
-                            }
-                            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#16233B] text-white text-sm font-semibold hover:bg-[#243654] transition"
-                          >
-                            <CheckCircle
-                              size={17}
-                            />
-                            Mark as Completed
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Completed Booking */}
-                      {booking.status ===
-                        "Completed" && (
-                        <div className="mt-5 flex items-center gap-2 text-sm font-semibold text-green-600">
-                          <CheckCircle
-                            size={18}
-                          />
-                          Service Completed
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Future Features */}
-            <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-5">
-              <div className="bg-white rounded-2xl border border-gray-200 p-6">
-                <h3 className="font-bold text-[#16233B]">
-                  Service Bookings
-                </h3>
-
-                <p className="mt-2 text-sm text-gray-500">
-                  View and manage customer service
-                  requests.
-                </p>
-              </div>
-
-              <div className="bg-white rounded-2xl border border-gray-200 p-6">
-                <h3 className="font-bold text-[#16233B]">
-                  Ratings & Reviews
-                </h3>
-
-                <p className="mt-2 text-sm text-gray-500">
-                  View customer ratings and reviews.
-                </p>
-              </div>
-
-              <div className="bg-white rounded-2xl border border-gray-200 p-6">
-                <h3 className="font-bold text-[#16233B]">
-                  Availability
-                </h3>
-
-                <p className="mt-2 text-sm text-gray-500">
-                  Manage your availability for new
-                  bookings.
-                </p>
-              </div>
-            </div>
-          </>
-        )}
+            )}
+          </div>
+        </section>
       </div>
     </main>
+  );
+};
+
+/* ==========================================================
+   HEADER
+   ========================================================== */
+
+type DashboardHeaderProps = {
+  providerName?: string;
+  profileImageSrc: string | null;
+  initials: string;
+  onLogout: () => void;
+};
+
+const DashboardHeader = ({
+  providerName,
+  profileImageSrc,
+  initials,
+  onLogout,
+}: DashboardHeaderProps) => (
+  <header className="sticky top-0 z-30 border-b border-white/5 bg-[#16233B] text-white shadow-sm">
+    <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6 sm:py-4">
+      {/* Brand */}
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="text-lg font-extrabold tracking-tight sm:text-xl">
+          Ghar<span className="text-[#E3A73A]">Sewa</span>
+        </span>
+        <span
+          className="hidden h-5 w-px bg-white/15 sm:block"
+          aria-hidden="true"
+        />
+        <span className="hidden truncate text-xs font-medium text-white/70 sm:block">
+          Professional Dashboard
+        </span>
+      </div>
+
+      {/* Identity + Logout */}
+      <div className="flex items-center gap-3 sm:gap-4">
+        <div className="flex items-center gap-2.5">
+          {providerName !== undefined ? (
+            <>
+              {profileImageSrc ? (
+                <img
+                  src={profileImageSrc}
+                  alt={`${providerName} profile photo`}
+                  className="h-8 w-8 rounded-full border border-white/20 object-cover"
+                />
+              ) : (
+                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#E3A73A] text-[11px] font-bold text-[#16233B]">
+                  {initials || "GS"}
+                </span>
+              )}
+              <span className="hidden max-w-[160px] truncate text-sm font-semibold sm:inline">
+                {providerName}
+              </span>
+            </>
+          ) : (
+            <>
+              <div className="h-8 w-8 animate-pulse rounded-full bg-white/10" />
+              <div className="hidden h-4 w-24 animate-pulse rounded bg-white/10 sm:block" />
+            </>
+          )}
+        </div>
+
+        <button
+          type="button"
+          onClick={onLogout}
+          aria-label="Logout"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/10 px-3 py-1.5 text-xs font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#E3A73A] focus-visible:ring-offset-2 focus-visible:ring-offset-[#16233B] motion-reduce:transition-none motion-reduce:hover:translate-y-0"
+        >
+          <LogOut size={14} />
+          <span className="hidden sm:inline">Logout</span>
+        </button>
+      </div>
+    </div>
+  </header>
+);
+
+/* ==========================================================
+   BOOKING CARD
+   ========================================================== */
+
+type BookingCardProps = {
+  booking: Booking;
+  updating: boolean;
+  onUpdate: (status: "Accepted" | "Rejected" | "Completed") => void;
+};
+
+const BookingCard = ({ booking, updating, onUpdate }: BookingCardProps) => {
+  const customerName = booking.customerId?.fullname || "Customer";
+  const customerPhone = booking.customerId?.phone;
+
+  return (
+    <article className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition-all duration-200 hover:border-gray-300 hover:shadow-md motion-reduce:transition-none">
+      {/* HEADER: customer + status */}
+      <div className="flex flex-col gap-3 border-b border-gray-100 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h3 className="truncate text-base font-bold text-[#16233B]">
+            {customerName}
+          </h3>
+          {customerPhone && (
+            <p className="mt-0.5 inline-flex items-center gap-1.5 text-sm text-gray-500">
+              <Phone size={12} className="text-gray-400" aria-hidden="true" />
+              <a
+                href={`tel:${customerPhone}`}
+                className="rounded underline-offset-2 transition-colors duration-200 hover:text-[#F26B5E] hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[#E3A73A]"
+              >
+                {customerPhone}
+              </a>
+            </p>
+          )}
+        </div>
+
+        <StatusBadge status={booking.status} />
+      </div>
+
+      {/* DETAILS: service / date / time */}
+      <div className="grid grid-cols-1 gap-4 px-5 py-4 sm:grid-cols-3">
+        <BookingDetail
+          Icon={Briefcase}
+          label="Service"
+          value={humanService(booking.service)}
+        />
+        <BookingDetail
+          Icon={CalendarDays}
+          label="Date"
+          value={formatBookingDate(booking.bookingDate)}
+        />
+        <BookingDetail
+          Icon={Clock}
+          label="Time"
+          value={formatBookingTime(booking.bookingTime)}
+        />
+      </div>
+
+      {/* ADDRESS + REQUIREMENT */}
+      <div className="space-y-4 border-t border-gray-100 px-5 py-4">
+        <div className="flex items-start gap-2.5 text-sm text-gray-600">
+          <MapPin
+            size={15}
+            className="mt-0.5 shrink-0 text-gray-400"
+            aria-hidden="true"
+          />
+          <span className="break-words">{booking.address}</span>
+        </div>
+
+        <div className="rounded-xl bg-[#F7F4EE]/60 px-4 py-3">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-gray-500">
+            Customer Requirement
+          </p>
+          <p className="mt-1 break-words text-sm text-[#16233B]">
+            {booking.description}
+          </p>
+        </div>
+      </div>
+
+      {/* FOOTER: price + actions */}
+      <div className="flex flex-col gap-3 border-t border-gray-100 bg-gray-50/50 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-[11px] font-bold uppercase tracking-wider text-gray-500">
+            Total
+          </p>
+          <p className="mt-0.5 text-lg font-bold tabular-nums text-[#16233B]">
+            {formatNPR(booking.price)}
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          {booking.status === "Pending" && (
+            <>
+              <button
+                type="button"
+                disabled={updating}
+                onClick={() => onUpdate("Rejected")}
+                className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-[#16233B] shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-red-300 hover:bg-red-50 hover:text-red-600 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-[#E3A73A] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0 disabled:hover:bg-white disabled:hover:text-[#16233B] motion-reduce:transition-none sm:w-auto"
+              >
+                <X size={15} />
+                Reject
+              </button>
+              <button
+                type="button"
+                disabled={updating}
+                onClick={() => onUpdate("Accepted")}
+                className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-[#16233B] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#F26B5E] hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-[#E3A73A] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0 disabled:hover:bg-[#16233B] motion-reduce:transition-none sm:w-auto"
+              >
+                {updating ? (
+                  <>
+                    <Loader2 size={15} className="animate-spin" />
+                    Updating...
+                  </>
+                ) : (
+                  <>
+                    <Check size={15} />
+                    Accept
+                  </>
+                )}
+              </button>
+            </>
+          )}
+
+          {booking.status === "Accepted" && (
+            <button
+              type="button"
+              disabled={updating}
+              onClick={() => onUpdate("Completed")}
+              className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-[#16233B] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#F26B5E] hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-[#E3A73A] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0 disabled:hover:bg-[#16233B] motion-reduce:transition-none sm:w-auto"
+            >
+              {updating ? (
+                <>
+                  <Loader2 size={15} className="animate-spin" />
+                  Updating...
+                </>
+              ) : (
+                <>
+                  <CheckCircle size={15} />
+                  Mark as Completed
+                </>
+              )}
+            </button>
+          )}
+
+          {booking.status === "Completed" && (
+            <span className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-50 px-3.5 py-2 text-sm font-semibold text-emerald-700">
+              <CheckCircle size={15} />
+              Service Completed
+            </span>
+          )}
+        </div>
+      </div>
+    </article>
   );
 };

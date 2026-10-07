@@ -72,7 +72,7 @@ const TRENDING = [
 const TESTIMONIALS = [
   {
     name: "Aarav Sharma",
-    text: "SewaKhoj helped me find a reliable plumber quickly. The service was excellent.",
+    text: "GharSewa helped me find a reliable plumber quickly. The service was excellent.",
     rating: 5,
     image: "",
   },
@@ -89,6 +89,19 @@ const TESTIMONIALS = [
     image: "",
   },
 ];
+
+/* ------------------------------------------------------------------ */
+/*  AUTH HELPER                                                        */
+/* ------------------------------------------------------------------ */
+
+const isAuthenticated = (): boolean => {
+  if (typeof window === "undefined") return false;
+  try {
+    return Boolean(localStorage.getItem("access_token"));
+  } catch {
+    return false;
+  }
+};
 
 /* ------------------------------------------------------------------ */
 /*  ANIMATION HELPERS                                                  */
@@ -225,7 +238,7 @@ export default function Sections() {
         </div>
       </section>
 
-      {/* Become a Pro */}
+      {/* Become a Pro (CTA hidden when logged in) */}
       <BecomeAPro />
 
       {/* Trending Services */}
@@ -464,6 +477,13 @@ function ServiceCard({ service }: { service: (typeof TRENDING)[number] }) {
 function BecomeAPro() {
   const { ref, inView } = useInView<HTMLElement>(0.2);
 
+  // Hide the "Become a Pro" CTA for authenticated users.
+  // Reads the same access token key used across the app.
+  const [loggedIn, setLoggedIn] = useState(false);
+  useEffect(() => {
+    setLoggedIn(isAuthenticated());
+  }, []);
+
   // Fade-up helper with a stagger delay (ms); merges extra classes
   const rv = (delay: number, extra = "") => ({
     style: { transitionDelay: `${delay}ms` },
@@ -529,26 +549,29 @@ function BecomeAPro() {
               "mx-auto mt-4 max-w-lg text-[#F7F4EE]/80 md:mx-0"
             )}
           >
-            Join SewaKhoj, build your professional profile, and connect with
+            Join GharSewa, build your professional profile, and connect with
             customers looking for trusted services near them.
           </p>
 
-          <div {...rv(400, "mt-7")}>
-            <Link
-              to="/register"
-              className="group inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#F26B5E] to-[#F08454] px-6 py-3 font-semibold text-white shadow-lg shadow-[#F26B5E]/20 transition-all duration-300 hover:-translate-y-0.5 hover:brightness-110 hover:shadow-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E3A73A] focus-visible:ring-offset-2 focus-visible:ring-offset-[#16233B] motion-reduce:transition-none motion-reduce:hover:translate-y-0"
-            >
-              Become a SewaKhoj Pro
-              <ArrowRight
-                size={18}
-                className="transition-transform duration-300 group-hover:translate-x-1 motion-reduce:transition-none motion-reduce:group-hover:translate-x-0"
-              />
-            </Link>
+          {/* CTA: hidden when the user is already logged in */}
+          {!loggedIn && (
+            <div {...rv(400, "mt-7")}>
+              <Link
+                to="/register"
+                className="group inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#F26B5E] to-[#F08454] px-6 py-3 font-semibold text-white shadow-lg shadow-[#F26B5E]/20 transition-all duration-300 hover:-translate-y-0.5 hover:brightness-110 hover:shadow-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E3A73A] focus-visible:ring-offset-2 focus-visible:ring-offset-[#16233B] motion-reduce:transition-none motion-reduce:hover:translate-y-0"
+              >
+                Become a GharSewa Pro
+                <ArrowRight
+                  size={18}
+                  className="transition-transform duration-300 group-hover:translate-x-1 motion-reduce:transition-none motion-reduce:group-hover:translate-x-0"
+                />
+              </Link>
 
-            <p className="mt-4 text-xs text-white/50 sm:text-sm">
-              Create your profile • Get discovered • Grow your business
-            </p>
-          </div>
+              <p className="mt-4 text-xs text-white/50 sm:text-sm">
+                Create your profile • Get discovered • Grow your business
+              </p>
+            </div>
+          )}
         </div>
 
         {/* CSS-only decorative visual */}
@@ -861,7 +884,7 @@ function PhoneMockup() {
 
         <div className="px-3 pt-6">
           <p className="text-sm font-extrabold tracking-tight text-[#16233B]">
-            Sewa<span className="text-[#E3A73A]">Khoj</span>
+            Ghar<span className="text-[#E3A73A]">Sewa</span>
           </p>
 
           <div className="mt-3 flex items-center gap-1.5 rounded-lg bg-[#F7F4EE] px-2 py-1.5 text-[10px] text-gray-400">
