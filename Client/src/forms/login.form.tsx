@@ -394,37 +394,30 @@ export const LoginForm = () => {
                     : "border-gray-200 focus-within:border-[#16233B] focus-within:ring-2 focus-within:ring-[#16233B]/10"
                 }`}
               >
+                {/* [&::-ms-reveal]:hidden removes the browser's own built-in
+                    "reveal password" eye (Edge), so only OUR toggle is shown */}
                 <input
                   {...register("password")}
                   id="password"
-                  type={
-                    showPassword
-                      ? "text"
-                      : "password"
-                  }
+                  type={showPassword ? "text" : "password"}
                   autoComplete="current-password"
                   placeholder="Enter your password"
-                  className="h-full w-full rounded-xl bg-transparent px-4 pr-12 text-sm text-[#16233B] outline-none placeholder:text-gray-400"
+                  className="h-full w-full rounded-xl bg-transparent px-4 pr-12 text-sm text-[#16233B] outline-none placeholder:text-gray-400 [&::-ms-reveal]:hidden [&::-ms-clear]:hidden"
                 />
 
+                {/* Hidden password  -> EyeOff icon (crossed eye = hidden)
+                    Visible password -> Eye icon    (open eye = visible) */}
                 <button
                   type="button"
-                  onClick={() =>
-                    setShowPassword(
-                      (previous) => !previous
-                    )
-                  }
+                  onClick={() => setShowPassword((previous) => !previous)}
                   className="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg text-gray-500 transition-colors duration-200 hover:bg-gray-100 hover:text-[#16233B] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#16233B]/30"
-                  aria-label={
-                    showPassword
-                      ? "Hide password"
-                      : "Show password"
-                  }
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-pressed={showPassword}
                 >
                   {showPassword ? (
-                    <EyeOff size={18} />
-                  ) : (
                     <Eye size={18} />
+                  ) : (
+                    <EyeOff size={18} />
                   )}
                 </button>
               </div>

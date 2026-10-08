@@ -1,18 +1,21 @@
-
 import axios from "axios";
 
 const API_BASE_URL = "http://localhost:9005";
 
-// Get logged-in provider profile
-export const getProviderProfile = async () => {
+// JWT auth header, read from localStorage at call time
+const authHeaders = () => {
   const token = localStorage.getItem("access_token");
+  return {
+    Authorization: `Bearer ${token}`,
+  };
+};
 
-  const response = await axios.get(
+// Get logged-in provider profile
+export const getProviderProfile = async (): Promise<unknown> => {
+  const response = await axios.get<unknown>(
     `${API_BASE_URL}/provider/details`,
     {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers: authHeaders(),
     }
   );
 
@@ -22,22 +25,25 @@ export const getProviderProfile = async () => {
 // Create provider profile
 export const createProviderProfile = async (
   formData: FormData
-) => {
-  const token = localStorage.getItem("access_token");
-
-  const response = await axios.post(
+): Promise<unknown> => {
+  const response = await axios.post<unknown>(
     `${API_BASE_URL}/provider/details`,
     formData,
     {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers: authHeaders(),
     }
   );
 
   return response.data;
 };
 
-export const getProviderProfileById = async ( providerId: string ) => 
-    { const response = await axios.get( `${API_BASE_URL}/provider/${providerId}` );
- return response.data; };
+// Get a provider by id (public)
+export const getProviderProfileById = async (
+  providerId: string
+): Promise<unknown> => {
+  const response = await axios.get<unknown>(
+    `${API_BASE_URL}/provider/${providerId}`
+  );
+
+  return response.data;
+};

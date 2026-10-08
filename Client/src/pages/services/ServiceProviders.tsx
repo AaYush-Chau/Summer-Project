@@ -27,7 +27,13 @@ import {
   getProvidersByService,
   type ServiceType,
 } from "../../api/services.api";
-import { resolveAssetUrl } from "../../api/user.api";
+import {
+  getProviderReviews,
+  idOf,
+  normalizeReviewsResponse,
+} from "../../api/review.api";
+import type { ReviewRecord } from "../../api/review.api";
+import { readStoredUser, resolveAssetUrl } from "../../api/user.api";
 
 // Controlled modal component imported from same directory
 import Booking from "../booking/Booking";
@@ -56,7 +62,17 @@ export type Provider = {
   };
 };
 
+// Everything the review UI needs for one provider, from getProviderReviews()
+type ReviewsEntry = {
+  reviews: ReviewRecord[];
+  average: number; // meta.averageRating, else calculated from the reviews
+  count: number; // meta.count, else reviews.length
+  error: boolean; // the request failed
+};
+
 type SortKey = "recommended" | "priceLow" | "priceHigh" | "experience" | "rating";
+
+type DialogStage = "none" | "details" | "booking" | "reviews";
 
 const SERVICE_NAMES: Record<string, string> = {
   plumber: "Plumbing",
@@ -139,36 +155,19 @@ const ANIMATION_CSS = `
 }
 `;
 
-const API_BASE_URL = (
-  (import.meta.env.VITE_APP_BASE_URL as string | undefined) ??
-  "http://localhost:9005"
-).replace(/\/+$/, "");
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-const loadRatings = async (
-  providerIds: string[],
-  signal: AbortSignal
-): Promise<Record<string, number>> => {
+// Loads reviews with the existing getProviderReviews() API, ONE request per
+// provider. The same data feeds the card rating, the review count and the
+// "View All Reviews" modal, so opening the modal needs no extra request.
+const loadReviews = async (
+  providerIds: string[]
+): Promise<Record<string, ReviewsEntry>> => {
   const entries = await Promise.all(
-    providerIds.map(async (id): Promise<[string, number]> => {
+    providerIds.map(async (id): Promise<[string, ReviewsEntry]> => {
       try {
-        const response = await fetch(`${API_BASE_URL}/review/provider/${id}`, {
-          headers: { Accept: "application/json" },
-          signal,
-        });
-        if (!response.ok) return [id, 0];
-
-        const body: unknown = await response.json();
-        const average =
-          isRecord(body) && isRecord(body.meta)
-            ? body.meta.averageRating
-            : undefined;
-
-        return [id, typeof average === "number" ? average : 0];
+        const body: unknown = await getProviderReviews(id);
+        return [id, { ...normalizeReviewsResponse(body), error: false }];
       } catch {
-        return [id, 0];
+        return [id, { reviews: [], average: 0, count: 0, error: true }];
       }
     })
   );
@@ -179,11 +178,57 @@ const loadRatings = async (
 const yearsLabel = (years: number): string =>
   `${years} ${years === 1 ? "year" : "years"}`;
 
+// "2 days ago" (null when the date is missing / invalid)
+const formatRelative = (iso: string): { text: string; full: string } | null => {
+  if (!iso) return null;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+
+  const full = date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (seconds < 60) return { text: "Just now", full };
+
+  const units: [Intl.RelativeTimeFormatUnit, number][] = [
+    ["year", 31536000],
+    ["month", 2592000],
+    ["week", 604800],
+    ["day", 86400],
+    ["hour", 3600],
+    ["minute", 60],
+  ];
+  const [unit, size] = units.find(([, s]) => seconds >= s) ?? units[5];
+  const text = new Intl.RelativeTimeFormat("en", { numeric: "auto" }).format(
+    -Math.floor(seconds / size),
+    unit
+  );
+  return { text, full };
+};
+
+// Newest first; reviews without a date yet come first
+const reviewTime = (r: ReviewRecord): number => {
+  const t = r.createdAt ? new Date(r.createdAt).getTime() : NaN;
+  return Number.isNaN(t) ? Number.POSITIVE_INFINITY : t;
+};
+
 // ==========================================
 // SHARED PRESENTATIONAL COMPONENTS
 // ==========================================
 
-const RatingStars = ({ rating }: { rating: number }) => {
+// Existing component, extended with optional `size` / `showValue`
+// (defaults keep every current usage exactly as it was)
+const RatingStars = ({
+  rating,
+  size = 13,
+  showValue = true,
+}: {
+  rating: number;
+  size?: number;
+  showValue?: boolean;
+}) => {
   const value = Number.isFinite(rating) ? Math.min(Math.max(rating, 0), 5) : 0;
   const filled = Math.floor(value);
 
@@ -197,7 +242,7 @@ const RatingStars = ({ rating }: { rating: number }) => {
         {[1, 2, 3, 4, 5].map((star) => (
           <Star
             key={star}
-            size={13}
+            size={size}
             className={
               star <= filled
                 ? "fill-[#E3A73A] text-[#E3A73A]"
@@ -206,9 +251,11 @@ const RatingStars = ({ rating }: { rating: number }) => {
           />
         ))}
       </div>
-      <span className="text-xs font-semibold text-[#16233B]">
-        {value.toFixed(1)}
-      </span>
+      {showValue && (
+        <span className="text-xs font-semibold text-[#16233B]">
+          {value.toFixed(1)}
+        </span>
+      )}
     </div>
   );
 };
@@ -384,6 +431,423 @@ const ModalShell = ({
 };
 
 // ==========================================
+// REVIEW COMPONENTS
+// ==========================================
+
+// "24 reviews · View All Reviews →" shown on the card and in the details modal
+const ReviewsLink = ({
+  entry,
+  providerName,
+  onClick,
+}: {
+  entry?: ReviewsEntry;
+  providerName: string;
+  onClick: () => void;
+}) => {
+  // still loading
+  if (!entry) {
+    return (
+      <span
+        className="block h-4 w-40 animate-pulse rounded bg-gray-100"
+        aria-hidden="true"
+      />
+    );
+  }
+
+  const total = Math.max(entry.count, entry.reviews.length);
+
+  if (!entry.error && total === 0) {
+    return <p className="text-xs text-gray-500">No reviews yet</p>;
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+      <span className="text-gray-600">
+        {entry.error
+          ? "Reviews unavailable"
+          : `${total} ${total === 1 ? "review" : "reviews"}`}
+      </span>
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label={`View all reviews for ${providerName}`}
+        className="group/reviews inline-flex items-center gap-0.5 rounded font-semibold text-[#F26B5E] transition-colors duration-200 hover:text-[#16233B] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#E3A73A]"
+      >
+        {entry.error ? "View Reviews" : "View All Reviews"}
+        <ChevronRight
+          size={14}
+          className="transition-transform duration-200 group-hover/reviews:translate-x-0.5 motion-reduce:transition-none"
+        />
+      </button>
+    </div>
+  );
+};
+
+// Reviewer avatar: image -> initial letter -> icon
+const ReviewerAvatar = ({
+  src,
+  name,
+}: {
+  src?: string | null;
+  name: string;
+}) => {
+  const [failed, setFailed] = useState(false);
+
+  if (src && !failed) {
+    return (
+      <img
+        src={src}
+        alt=""
+        onError={() => setFailed(true)}
+        className="h-10 w-10 shrink-0 rounded-full object-cover"
+      />
+    );
+  }
+
+  const initial = name.trim().charAt(0).toUpperCase();
+  return (
+    <span
+      aria-hidden="true"
+      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#F7F4EE] text-sm font-semibold text-[#16233B]"
+    >
+      {initial || <UserRound size={18} />}
+    </span>
+  );
+};
+
+const ReviewCard = ({
+  review,
+  own,
+  index,
+}: {
+  review: ReviewRecord;
+  own: boolean;
+  index: number;
+}) => {
+  const name = own ? "You" : review.customerName || "Customer";
+  const when = formatRelative(review.createdAt);
+
+  return (
+    <article
+      style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
+      className={`gs-fade-up rounded-2xl border p-4 transition-colors duration-200 motion-reduce:transition-none ${
+        own
+          ? "border-[#E3A73A]/50 bg-[#FFFBF3] ring-1 ring-[#E3A73A]/20"
+          : "border-gray-200 bg-white hover:border-gray-300"
+      }`}
+    >
+      <div className="flex items-start gap-3">
+        <ReviewerAvatar
+          key={review.customerAvatar ?? "none"}
+          src={review.customerAvatar}
+          name={name}
+        />
+
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <p className="max-w-full truncate text-sm font-semibold text-[#16233B]">
+              {name}
+            </p>
+            {own && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-[#E3A73A]/20 px-2 py-0.5 text-[11px] font-semibold text-[#16233B]">
+                <Sparkles size={11} aria-hidden="true" />
+                Your Review
+              </span>
+            )}
+          </div>
+          <div className="mt-1">
+            <RatingStars rating={review.rating} size={14} />
+          </div>
+        </div>
+
+        {when && (
+          <time
+            dateTime={review.createdAt}
+            title={when.full}
+            className="shrink-0 text-xs text-gray-400"
+          >
+            {when.text}
+          </time>
+        )}
+      </div>
+
+      {review.comment && (
+        <p className="mt-3 whitespace-pre-line break-words text-sm leading-relaxed text-gray-700">
+          “{review.comment}”
+        </p>
+      )}
+    </article>
+  );
+};
+
+// Bars are calculated from the reviews that were returned (never invented)
+const RatingDistribution = ({ reviews }: { reviews: ReviewRecord[] }) => {
+  const total = reviews.length;
+  const rows = [5, 4, 3, 2, 1].map((star) => {
+    const n = reviews.filter((r) => Math.round(r.rating) === star).length;
+    return { star, n, pct: total ? (n / total) * 100 : 0 };
+  });
+
+  return (
+    <ul className="space-y-2" aria-label="Rating breakdown">
+      {rows.map(({ star, n, pct }) => (
+        <li key={star} className="flex items-center gap-3 text-xs">
+          <span className="w-8 shrink-0 font-medium tabular-nums text-[#16233B]">
+            {star} ★
+          </span>
+          <div className="h-2 flex-1 overflow-hidden rounded-full bg-gray-200/70">
+            <div
+              className="h-full rounded-full bg-[#E3A73A] transition-[width] duration-500 motion-reduce:transition-none"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+          <span className="w-16 shrink-0 text-right tabular-nums text-gray-500">
+            {Math.round(pct)}%{" "}
+            <span className="text-gray-400">({n})</span>
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+};
+
+const ReviewSummary = ({
+  average,
+  count,
+  reviews,
+}: {
+  average: number;
+  count: number;
+  reviews: ReviewRecord[];
+}) => (
+  <div className="grid gap-6 rounded-2xl border border-gray-200 bg-[#F7F4EE]/60 p-5 sm:grid-cols-[190px_1fr] sm:items-center sm:gap-8">
+    <div className="text-center sm:text-left">
+      <p className="flex items-center justify-center gap-1.5 text-5xl font-extrabold tabular-nums text-[#16233B] sm:justify-start">
+        {average.toFixed(1)}
+        <Star
+          size={26}
+          aria-hidden="true"
+          className="fill-[#E3A73A] text-[#E3A73A]"
+        />
+      </p>
+      <div className="mt-2 flex justify-center sm:justify-start">
+        <RatingStars rating={average} size={20} showValue={false} />
+      </div>
+      <p className="mt-1.5 text-sm text-gray-500">
+        Based on {count} {count === 1 ? "review" : "reviews"}
+      </p>
+    </div>
+
+    <div>
+      <RatingDistribution reviews={reviews} />
+      {reviews.length < count && (
+        <p className="mt-2 text-[11px] text-gray-400">
+          Breakdown is based on the {reviews.length} reviews loaded.
+        </p>
+      )}
+    </div>
+  </div>
+);
+
+const ReviewSkeleton = () => (
+  <div
+    className="animate-pulse rounded-2xl border border-gray-200 bg-white p-4"
+    aria-hidden="true"
+  >
+    <div className="flex items-start gap-3">
+      <div className="h-10 w-10 rounded-full bg-gray-200" />
+      <div className="space-y-2">
+        <div className="h-3.5 w-28 rounded bg-gray-200" />
+        <div className="h-3 w-24 rounded bg-gray-100" />
+      </div>
+    </div>
+    <div className="mt-3 space-y-2">
+      <div className="h-3.5 w-full rounded bg-gray-100" />
+      <div className="h-3.5 w-11/12 rounded bg-gray-100" />
+      <div className="h-3.5 w-2/3 rounded bg-gray-100" />
+    </div>
+  </div>
+);
+
+const ReviewsLoading = () => (
+  <div role="status" aria-label="Loading reviews" className="space-y-5">
+    <div
+      className="h-40 animate-pulse rounded-2xl border border-gray-200 bg-[#F7F4EE]/60"
+      aria-hidden="true"
+    />
+    <div className="space-y-3">
+      <ReviewSkeleton />
+      <ReviewSkeleton />
+      <ReviewSkeleton />
+    </div>
+  </div>
+);
+
+const EmptyReviewsState = () => (
+  <div className="px-4 py-14 text-center">
+    <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-[#E3A73A]/15 text-[#16233B]">
+      <Star size={26} aria-hidden="true" className="fill-[#E3A73A]/40" />
+    </div>
+    <h3 className="mt-4 text-lg font-bold text-[#16233B]">No reviews yet</h3>
+    <p className="mt-1 text-sm text-gray-500">
+      Be the first customer to share your experience.
+    </p>
+  </div>
+);
+
+const ReviewsError = ({ onRetry }: { onRetry: () => void }) => (
+  <div role="alert" className="px-4 py-14 text-center">
+    <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-red-50 text-red-500">
+      <AlertCircle size={26} aria-hidden="true" />
+    </div>
+    <h3 className="mt-4 text-lg font-bold text-[#16233B]">
+      Unable to load reviews.
+    </h3>
+    <p className="mt-1 text-sm text-gray-500">Please try again in a moment.</p>
+    <button
+      type="button"
+      onClick={onRetry}
+      className="group mt-5 inline-flex items-center justify-center gap-2 rounded-lg bg-[#16233B] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 ease-out hover:-translate-y-0.5 hover:bg-[#F26B5E] hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-[#E3A73A] focus-visible:ring-offset-2"
+    >
+      <RefreshCw
+        size={15}
+        aria-hidden="true"
+        className="transition-transform duration-500 group-hover:rotate-180 motion-reduce:transition-none"
+      />
+      Try Again
+    </button>
+  </div>
+);
+
+// The "View All Reviews" modal (built on the existing ModalShell)
+type AllReviewsModalProps = {
+  open: boolean;
+  provider: Provider | null;
+  name: string;
+  imageSrc: string | null;
+  serviceName: string;
+  entry?: ReviewsEntry; // undefined = still loading
+  isOwnReview: (review: ReviewRecord) => boolean;
+  onClose: () => void;
+  onRetry: () => void;
+};
+
+const AllReviewsModal = ({
+  open,
+  provider,
+  name,
+  imageSrc,
+  serviceName,
+  entry,
+  isOwnReview,
+  onClose,
+  onRetry,
+}: AllReviewsModalProps) => {
+  // The customer's own review is pinned first, the rest are newest first
+  const sorted = useMemo(() => {
+    if (!entry) return [];
+    const withOwn = entry.reviews.map((review) => ({
+      review,
+      own: isOwnReview(review),
+    }));
+    return withOwn.sort((a, b) =>
+      a.own !== b.own
+        ? a.own
+          ? -1
+          : 1
+        : reviewTime(b.review) - reviewTime(a.review)
+    );
+  }, [entry, isOwnReview]);
+
+  if (!provider) return null;
+
+  const titleId = `reviews-modal-title-${provider._id}`;
+  const total = entry ? Math.max(entry.count, entry.reviews.length) : 0;
+
+  return (
+    <ModalShell
+      open={open}
+      onClose={onClose}
+      labelledBy={titleId}
+      maxWidth="max-w-3xl"
+    >
+      <div className="flex max-h-[calc(90vh-2px)] flex-col">
+        {/* HEADER (stays visible while the list scrolls) */}
+        <div className="flex shrink-0 items-start gap-4 border-b border-gray-100 p-5 sm:p-6">
+          <div className="h-12 w-12 shrink-0 overflow-hidden rounded-full border-2 border-[#F7F4EE] bg-[#F7F4EE] shadow-sm sm:h-14 sm:w-14">
+            <ProviderImage
+              key={imageSrc ?? "none"}
+              src={imageSrc}
+              name={name}
+              rounded
+            />
+          </div>
+
+          <div className="min-w-0 flex-1 pr-10">
+            <p className="truncate text-xs font-semibold text-[#F26B5E]">
+              {name} · {serviceName}
+            </p>
+            <h2
+              id={titleId}
+              className="text-xl font-bold text-[#16233B] sm:text-2xl"
+            >
+              Customer Reviews
+            </h2>
+            <p className="mt-0.5 text-sm text-gray-500">
+              See what customers say about this professional.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close reviews"
+            className="absolute right-4 top-4 inline-flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white text-[#16233B] shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-[#F26B5E] hover:text-[#F26B5E] hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-[#E3A73A]"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* BODY (scrolls inside the modal) */}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5 sm:p-6">
+          {!entry ? (
+            <ReviewsLoading />
+          ) : entry.error && entry.reviews.length === 0 ? (
+            <ReviewsError onRetry={onRetry} />
+          ) : sorted.length === 0 ? (
+            <EmptyReviewsState />
+          ) : (
+            <div className="space-y-5">
+              <ReviewSummary
+                average={entry.average}
+                count={total}
+                reviews={entry.reviews}
+              />
+
+              <div>
+                <h3 className="mb-3 text-sm font-bold text-[#16233B]">
+                  All reviews ({total})
+                </h3>
+                <div className="space-y-3">
+                  {sorted.map(({ review, own }, index) => (
+                    <ReviewCard
+                      key={review.id}
+                      review={review}
+                      own={own}
+                      index={index}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </ModalShell>
+  );
+};
+
+// ==========================================
 // PROVIDER DETAILS MODAL
 // ==========================================
 
@@ -392,10 +856,12 @@ type DetailsModalProps = {
   provider: Provider | null;
   name: string;
   rating: number;
+  reviewsEntry?: ReviewsEntry;
   imageSrc: string | null;
   serviceName: string;
   onClose: () => void;
   onBook: () => void;
+  onViewReviews: () => void;
 };
 
 const ProviderDetailsModal = ({
@@ -403,10 +869,12 @@ const ProviderDetailsModal = ({
   provider,
   name,
   rating,
+  reviewsEntry,
   imageSrc,
   serviceName,
   onClose,
   onBook,
+  onViewReviews,
 }: DetailsModalProps) => {
   if (!provider) return null;
 
@@ -461,6 +929,14 @@ const ProviderDetailsModal = ({
                 {provider.availability}
               </span>
               <RatingStars rating={rating} />
+            </div>
+
+            <div className="mt-2 flex justify-center sm:justify-start">
+              <ReviewsLink
+                entry={reviewsEntry}
+                providerName={name}
+                onClick={onViewReviews}
+              />
             </div>
           </div>
         </div>
@@ -559,20 +1035,43 @@ export default function ServiceProviders() {
   const { service } = useParams();
 
   const [providers, setProviders] = useState<Provider[]>([]);
-  const [ratings, setRatings] = useState<Record<string, number>>({});
+  // Reviews + rating + count per provider (from getProviderReviews)
+  const [reviewMap, setReviewMap] = useState<Record<string, ReviewsEntry>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [sortBy, setSortBy] = useState<SortKey>("recommended");
 
   const [activeProvider, setActiveProvider] = useState<Provider | null>(null);
-  const [dialogStage, setDialogStage] = useState<"none" | "details" | "booking">(
-    "none"
-  );
+  const [dialogStage, setDialogStage] = useState<DialogStage>("none");
 
   const [reloadKey, setReloadKey] = useState(0);
 
   const serviceName = SERVICE_NAMES[service || ""] || "Service";
   const ServiceIcon = SERVICE_ICONS[service || ""] || Briefcase;
+
+  // The logged-in user (same cached user the rest of the app uses)
+  const currentUser = useMemo(() => readStoredUser(), []);
+  const currentUserId = idOf(currentUser);
+  const currentUserEmail = currentUser?.email;
+
+  // A review is the user's own ONLY when its customer id (or email) matches.
+  // Never "the first review".
+  const isOwnReview = useMemo(
+    () =>
+      (review: ReviewRecord): boolean => {
+        if (review.customerId && currentUserId) {
+          return review.customerId === currentUserId;
+        }
+        if (review.customerEmail && currentUserEmail) {
+          return (
+            review.customerEmail.toLowerCase() ===
+            currentUserEmail.toLowerCase()
+          );
+        }
+        return false;
+      },
+    [currentUserId, currentUserEmail]
+  );
 
   useEffect(() => {
     const loadProviders = async () => {
@@ -598,28 +1097,42 @@ export default function ServiceProviders() {
     loadProviders();
   }, [service, reloadKey]);
 
+  // One getProviderReviews() request per provider
   useEffect(() => {
     if (providers.length === 0) return;
 
-    const controller = new AbortController();
+    let cancelled = false;
 
-    loadRatings(
-      providers.map((provider) => provider._id),
-      controller.signal
-    ).then((result) => {
-      if (!controller.signal.aborted) {
-        setRatings((current) => ({ ...current, ...result }));
+    loadReviews(providers.map((provider) => provider._id)).then((result) => {
+      if (!cancelled) {
+        setReviewMap((current) => ({ ...current, ...result }));
       }
     });
 
-    return () => controller.abort();
+    return () => {
+      cancelled = true;
+    };
   }, [providers]);
 
+  // "Try Again" inside the reviews modal
+  const retryReviews = (providerId: string) => {
+    setReviewMap((current) => {
+      const next = { ...current };
+      delete next[providerId]; // back to the loading skeleton
+      return next;
+    });
+    loadReviews([providerId]).then((result) =>
+      setReviewMap((current) => ({ ...current, ...result }))
+    );
+  };
+
   const getRating = (provider: Provider): number =>
-    ratings[provider._id] ?? provider.rating ?? 0;
+    reviewMap[provider._id]?.average ?? provider.rating ?? 0;
 
   const sortedProviders = useMemo(() => {
     const list = [...providers];
+    const ratingOf = (p: Provider) =>
+      reviewMap[p._id]?.average ?? p.rating ?? 0;
 
     switch (sortBy) {
       case "priceLow":
@@ -629,21 +1142,23 @@ export default function ServiceProviders() {
       case "experience":
         return list.sort((a, b) => b.experience - a.experience);
       case "rating":
-        return list.sort(
-          (a, b) =>
-            (ratings[b._id] ?? b.rating ?? 0) -
-            (ratings[a._id] ?? a.rating ?? 0)
-        );
+        return list.sort((a, b) => ratingOf(b) - ratingOf(a));
       default:
         return list;
     }
-  }, [providers, ratings, sortBy]);
+  }, [providers, reviewMap, sortBy]);
 
   const showResults = !loading && !error && providers.length > 0;
 
   const openDetails = (provider: Provider) => {
     setActiveProvider(provider);
     setDialogStage("details");
+  };
+
+  // "View All Reviews" on a provider card
+  const openReviews = (provider: Provider) => {
+    setActiveProvider(provider);
+    setDialogStage("reviews");
   };
 
   const closeAllDialogs = () => {
@@ -655,6 +1170,14 @@ export default function ServiceProviders() {
     setDialogStage("none");
     window.setTimeout(() => {
       setDialogStage("booking");
+    }, 230);
+  };
+
+  // "View All Reviews" inside the details modal
+  const openReviewsFromDetails = () => {
+    setDialogStage("none");
+    window.setTimeout(() => {
+      setDialogStage("reviews");
     }, 230);
   };
 
@@ -673,6 +1196,7 @@ export default function ServiceProviders() {
           : null
       )
     : null;
+  const activeEntry = activeProvider ? reviewMap[activeProvider._id] : undefined;
 
   return (
     <main className="min-h-screen bg-[#F7F4EE] px-4 py-6 sm:px-6 sm:py-8">
@@ -872,6 +1396,15 @@ export default function ServiceProviders() {
                       </span>
                     </div>
 
+                    {/* REVIEW COUNT + VIEW ALL REVIEWS */}
+                    <div className="mt-2">
+                      <ReviewsLink
+                        entry={reviewMap[provider._id]}
+                        providerName={name}
+                        onClick={() => openReviews(provider)}
+                      />
+                    </div>
+
                     <p className="mt-2 flex items-center gap-1.5 text-xs text-gray-500">
                       <MapPin size={13} className="shrink-0" />
                       Kathmandu, Nepal
@@ -913,10 +1446,25 @@ export default function ServiceProviders() {
         provider={activeProvider}
         name={activeName}
         rating={activeProvider ? getRating(activeProvider) : 0}
+        reviewsEntry={activeEntry}
         imageSrc={activeImageSrc}
         serviceName={serviceName}
         onClose={closeAllDialogs}
         onBook={openBookingFromDetails}
+        onViewReviews={openReviewsFromDetails}
+      />
+
+      {/* ALL REVIEWS MODAL */}
+      <AllReviewsModal
+        open={dialogStage === "reviews"}
+        provider={activeProvider}
+        name={activeName}
+        imageSrc={activeImageSrc}
+        serviceName={serviceName}
+        entry={activeEntry}
+        isOwnReview={isOwnReview}
+        onClose={closeAllDialogs}
+        onRetry={() => activeProvider && retryReviews(activeProvider._id)}
       />
 
       {/* BOOKING MODAL */}
