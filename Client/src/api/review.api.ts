@@ -26,6 +26,17 @@ export type NormalizedReviews = {
   count: number; // meta.count, else reviews.length
 };
 
+export interface TopProfessional {
+  id: string;
+  name: string;
+  services: string[]; // [] when none
+  location: string;
+  image: string; // "" when none
+  verified: boolean;
+  rating: number;
+  reviews: number;
+}
+
 // ==========================================
 // CREATE REVIEW
 // ==========================================
@@ -153,4 +164,108 @@ export const getErrorMessage = (err: unknown, fallback: string): string => {
     }
   }
   return err instanceof Error && err.message ? err.message : fallback;
+};
+
+// ==========================================
+// GET TOP RATED PROFESSIONALS (homepage)
+// ==========================================
+
+const OBJECT_ID = /^[a-f0-9]{24}$/i;
+
+const SERVICE_LABELS: Record<string, string> = {
+  plumber: "Plumbing",
+  electrician: "Electrical",
+  cleaner: "Cleaning",
+  painter: "Painting",
+};
+
+const prettyService = (name: string): string =>
+  SERVICE_LABELS[name.toLowerCase()] ??
+  name.charAt(0).toUpperCase() + name.slice(1);
+
+/** Accepts "plumber", ["plumber"] or [{ name: "Plumbing" }]; ignores raw Mongo ids. */
+const toServiceNames = (value: unknown): string[] => {
+  const items: unknown[] = Array.isArray(value) ? value : [value];
+  const names: string[] = [];
+  items.forEach((item) => {
+    const raw = isRecord(item)
+      ? firstString(item.name, item.title, item.serviceName, item.service)
+      : firstString(item);
+    if (!raw || OBJECT_ID.test(raw)) return;
+    const name = prettyService(raw);
+    if (!names.includes(name)) names.push(name);
+  });
+  return names;
+};
+
+/** Tries every field the backend might use for the profession. */
+const pickServices = (raw: Record<string, unknown>): string[] => {
+  for (const candidate of [
+    raw.services,
+    raw.service,
+    raw.profession,
+    raw.serviceType,
+    raw.category,
+  ]) {
+    const names = toServiceNames(candidate);
+    if (names.length) return names;
+  }
+  return [];
+};
+
+export const getTopProfessionals = async (
+  limit = 3,
+  signal?: AbortSignal
+): Promise<TopProfessional[]> => {
+  const response = await axios.get(`${API_BASE_URL}/review/top-providers`, {
+    params: { limit },
+    signal,
+  });
+
+  const body: unknown = response.data;
+  const list: unknown[] =
+    isRecord(body) && Array.isArray(body.data)
+      ? body.data
+      : Array.isArray(body)
+        ? body
+        : [];
+
+  const pros: TopProfessional[] = [];
+
+  list.forEach((raw) => {
+    if (!isRecord(raw)) return;
+
+    const rating = Number(raw.averageRating);
+    const reviews = Number(raw.reviewCount);
+    const name = firstString(raw.name);
+
+    // Skip entries without a real name, a valid rating, or at least one review
+    if (
+      !name ||
+      !Number.isFinite(rating) ||
+      rating <= 0 ||
+      !Number.isFinite(reviews) ||
+      reviews < 1
+    ) {
+      return;
+    }
+
+    const image = firstString(raw.image);
+
+    pros.push({
+      id: idOf(raw) || name,
+      name,
+      services: pickServices(raw),
+      location: firstString(raw.location) ?? "",
+      image: image ? (resolveAssetUrl(image) ?? "") : "",
+      verified: raw.verified === true,
+      rating: Math.min(5, rating),
+      reviews: Math.floor(reviews),
+    });
+  });
+
+  // Defensive re-sort in case server order ever changes
+  return pros
+    .sort((a, b) => b.rating - a.rating || b.reviews - a.reviews)
+    .slice(0, limit);
 };

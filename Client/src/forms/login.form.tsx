@@ -245,7 +245,7 @@ export const LoginForm = () => {
                 <MapPin size={18} />
               </span>
               <span className="text-2xl font-extrabold tracking-tight text-[#16233B]">
-                Ghar<span className="text-[#E3A73A]">Sewa</span>
+                Sewa<span className="text-[#E3A73A]">Khoj</span>
               </span>
             </Link>
 
@@ -261,7 +261,7 @@ export const LoginForm = () => {
             </h1>
 
             <p className="mt-2 text-sm leading-relaxed text-gray-500">
-              Sign in to find trusted professionals and manage your GharSewa
+              Sign in to find trusted professionals and manage your SewaKhoj
               services.
             </p>
           </div>

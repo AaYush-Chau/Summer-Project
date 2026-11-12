@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { isCancel } from "axios";
 import {
   Star,
   ArrowRight,
@@ -18,12 +19,26 @@ import {
   Paintbrush,
   ShowerHead,
   Plug,
+  AlertCircle,
+  ChevronRight,
+  RefreshCw,
+  X,
 } from "lucide-react";
 import { Link } from "react-router-dom";
+import {
+  getTopProfessionals,
+  getProviderReviews,
+  normalizeReviewsResponse,
+  type TopProfessional,
+  type ReviewRecord,
+} from "../../api/review.api";
+import {
+  getProvidersByService,
+  type ServiceType,
+} from "../../api/services.api";
 
 /* ------------------------------------------------------------------ */
-/*  DATA  (set `image` to a local path later, e.g. "/images/hari.jpg") */
-/*  Empty image = a branded placeholder is shown automatically.        */
+/*  DATA                                                               */
 /* ------------------------------------------------------------------ */
 
 const STATS = [
@@ -31,33 +46,6 @@ const STATS = [
   { value: 50, suffix: "+", decimals: 0, label: "Services Completed", icon: CheckCircle },
   { value: 4.8, suffix: "/5", decimals: 1, label: "Average Rating", icon: Star },
   { value: 10, suffix: "+", decimals: 0, label: "Service Areas", icon: MapPin },
-];
-
-const TOP_PROS = [
-  {
-    name: "Hari Prasad",
-    service: "Professional Plumber",
-    location: "Kathmandu",
-    rating: 4.9,
-    reviews: 28,
-    image: "",
-  },
-  {
-    name: "Ramesh Karki",
-    service: "Electrician",
-    location: "New Baneshwor",
-    rating: 4.8,
-    reviews: 35,
-    image: "",
-  },
-  {
-    name: "Sita Cleaning Services",
-    service: "Cleaning Service",
-    location: "Baneshwor",
-    rating: 4.9,
-    reviews: 41,
-    image: "",
-  },
 ];
 
 const TRENDING = [
@@ -72,7 +60,7 @@ const TRENDING = [
 const TESTIMONIALS = [
   {
     name: "Aarav Sharma",
-    text: "GharSewa helped me find a reliable plumber quickly. The service was excellent.",
+    text: "SewaKhoj helped me find a reliable plumber quickly. The service was excellent.",
     rating: 5,
     image: "",
   },
@@ -203,10 +191,121 @@ function CountUp({
 }
 
 /* ------------------------------------------------------------------ */
+/*  DATA HOOK: TOP PROFESSIONALS                                       */
+/* ------------------------------------------------------------------ */
+
+type LoadStatus = "loading" | "success" | "error";
+
+function useTopProfessionals(limit = 3) {
+  const [status, setStatus] = useState<LoadStatus>("loading");
+  const [pros, setPros] = useState<TopProfessional[]>([]);
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setStatus("loading");
+
+    getTopProfessionals(limit, controller.signal)
+  .then((data: TopProfessional[]) => {
+    setPros(data);
+    setStatus("success");
+  })
+  .catch((err: unknown) => {
+  if (isCancel(err)) return;
+  console.error("top-providers failed:", err);
+  setStatus("error");
+});
+
+    return () => controller.abort();
+  }, [limit, attempt]);
+
+  return { status, pros, retry: () => setAttempt((n) => n + 1) };
+}
+
+/* ------------------------------------------------------------------ */
+/*  PROFESSION LOOKUP                                                  */
+/* ------------------------------------------------------------------ */
+
+// /review/top-providers does not always include the provider's service.
+// When it is missing, it is looked up from the same provider lists the
+// service pages use (getProvidersByService), matched by id, then by name.
+const SERVICE_KEYS = ["plumber", "electrician", "cleaner", "painter"] as const;
+
+type ProfessionMap = Record<string, string>;
+
+function useProfessions(pros: TopProfessional[], ready: boolean): ProfessionMap {
+  const [map, setMap] = useState<ProfessionMap>({});
+  const needsLookup = ready && pros.some((p) => !(p.services?.length));
+
+  useEffect(() => {
+    if (!needsLookup) return;
+    let cancelled = false;
+
+    Promise.all(
+      SERVICE_KEYS.map(async (key): Promise<{ key: string; item: unknown }[]> => {
+        try {
+          const res = await getProvidersByService(key as ServiceType);
+          const list: unknown = res?.data;
+          return Array.isArray(list) ? list.map((item) => ({ key, item })) : [];
+        } catch {
+          return [];
+        }
+      })
+    ).then((groups) => {
+      if (cancelled) return;
+      const next: ProfessionMap = {};
+
+      groups.forEach((group) =>
+        group.forEach(({ key, item }) => {
+          if (typeof item !== "object" || item === null) return;
+          const rec = item as Record<string, unknown>;
+          const label = SERVICE_LABELS[key];
+
+          if (typeof rec._id === "string") next[rec._id] = label;
+
+          const user = rec.userId;
+          if (typeof user === "object" && user !== null) {
+            const u = user as Record<string, unknown>;
+            if (typeof u._id === "string") next[u._id] = label;
+            if (typeof u.fullname === "string") {
+              next[`name:${u.fullname.trim().toLowerCase()}`] = label;
+            }
+          }
+        })
+      );
+
+      setMap(next);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [needsLookup]);
+
+  return map;
+}
+
+function professionOf(pro: TopProfessional, map: ProfessionMap): string {
+  return (
+    getProfession(pro) ||
+    map[pro.id] ||
+    map[`name:${pro.name.trim().toLowerCase()}`] ||
+    ""
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  MAIN COMPONENT                                                     */
 /* ------------------------------------------------------------------ */
 
 export default function Sections() {
+  const { status, pros, retry } = useTopProfessionals(3);
+  const [activePro, setActivePro] = useState<TopProfessional | null>(null);
+  const professions = useProfessions(pros, status === "success");
+
+  // Same idea as ServiceProviders: open the reviews for the clicked professional
+  const openReviews = (pro: TopProfessional) => setActivePro(pro);
+
   return (
     <>
       {/* Local keyframes (no Tailwind config needed) */}
@@ -221,22 +320,85 @@ export default function Sections() {
       <StatsStrip />
 
       {/* Top Professionals */}
-      <section id="professionals">
-        <Reveal>
-          <SectionTitle
-            small="TOP PROFESSIONALS"
-            title="Meet our trusted professionals"
-          />
-        </Reveal>
+      <section
+        id="professionals"
+        aria-labelledby="top-professionals-heading"
+        className="relative overflow-hidden rounded-3xl border border-[#16233B]/5 bg-gradient-to-br from-white via-[#F7F4EE] to-[#FBF3E4] px-4 py-10 sm:px-8 md:px-10 md:py-14"
+      >
+        {/* decorative: blurred gradient circles + dot pattern */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 opacity-70"
+          style={{
+            backgroundImage:
+              "radial-gradient(rgba(22,35,59,0.06) 1px, transparent 1px)",
+            backgroundSize: "22px 22px",
+          }}
+        />
+        <div
+          aria-hidden
+          className="np-glow pointer-events-none absolute -left-24 -top-24 h-80 w-80 rounded-full bg-[radial-gradient(circle,rgba(227,167,58,0.28),transparent_70%)]"
+        />
+        <div
+          aria-hidden
+          className="np-glow pointer-events-none absolute -bottom-28 -right-20 h-96 w-96 rounded-full bg-[radial-gradient(circle,rgba(242,107,94,0.22),transparent_70%)]"
+          style={{ animationDelay: "-4s" }}
+        />
 
-        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {TOP_PROS.map((pro, i) => (
-            <Reveal key={pro.name} delay={i * 100}>
-              <ProCard pro={pro} />
-            </Reveal>
-          ))}
+        <div className="relative">
+          <Reveal>
+            <div id="top-professionals-heading">
+              <SectionTitle
+                small="TOP PROFESSIONALS"
+                title="Meet our trusted professionals"
+              />
+            </div>
+          </Reveal>
+
+          <div
+            className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3"
+            aria-busy={status === "loading"}
+          >
+            {status === "loading" &&
+              Array.from({ length: 3 }).map((_, i) => (
+                <ProCardSkeleton key={i} />
+              ))}
+
+            {status === "success" &&
+              pros.map((pro, i) => (
+                <Reveal key={pro.id} delay={i * 100} className="h-full">
+                  <ProCard
+                    pro={pro}
+                    profession={professionOf(pro, professions)}
+                    onViewReviews={() => openReviews(pro)}
+                  />
+                </Reveal>
+              ))}
+
+            {status === "success" && pros.length === 0 && (
+              <StateMessage
+                title="No reviewed professionals yet"
+                text="Top professionals will appear here once customers start leaving reviews."
+              />
+            )}
+
+            {status === "error" && (
+              <StateMessage
+                title="Couldn't load professionals"
+                text="Something went wrong while fetching top professionals."
+                onRetry={retry}
+              />
+            )}
+          </div>
         </div>
       </section>
+
+      {/* Reviews modal for the selected professional */}
+      <ProReviewsModal
+        pro={activePro}
+        profession={activePro ? professionOf(activePro, professions) : ""}
+        onClose={() => setActivePro(null)}
+      />
 
       {/* Become a Pro (CTA hidden when logged in) */}
       <BecomeAPro />
@@ -373,59 +535,537 @@ function StatsStrip() {
   );
 }
 
-function ProCard({ pro }: { pro: (typeof TOP_PROS)[number] }) {
+/* ------------------------------------------------------------------ */
+/*  PROFESSIONAL CARD                                                  */
+/* ------------------------------------------------------------------ */
+
+// Fallback gradients (full class strings so Tailwind can detect them).
+// Picked deterministically from the name so a card never changes colour on re-render.
+const AVATAR_GRADIENTS = [
+  "from-[#16233B] via-[#1F3257] to-[#2A3F66]",
+  "from-[#16233B] via-[#2A3F66] to-[#F26B5E]/70",
+  "from-[#16233B] via-[#2A3F66] to-[#E3A73A]/70",
+];
+
+// Profession label ("Plumbing", "Electrical"...) from whatever the API returns.
+// Accepts an array or a string, plain strings or { name } objects, and the
+// raw service keys used elsewhere in the app (plumber, electrician, ...).
+const SERVICE_LABELS: Record<string, string> = {
+  plumber: "Plumbing",
+  electrician: "Electrical",
+  cleaner: "Cleaning",
+  painter: "Painting",
+};
+
+const toServiceLabel = (value: unknown): string => {
+  if (typeof value === "string") {
+    const key = value.trim();
+    if (!key) return "";
+    return (
+      SERVICE_LABELS[key.toLowerCase()] ??
+      key.charAt(0).toUpperCase() + key.slice(1)
+    );
+  }
+  if (value && typeof value === "object") {
+    const o = value as Record<string, unknown>;
+    return toServiceLabel(o.name ?? o.title ?? o.label ?? o.service);
+  }
+  return "";
+};
+
+function getProfession(pro: TopProfessional): string {
+  const raw = pro as unknown as Record<string, unknown>;
+  const candidates = [
+    raw.services,
+    raw.service,
+    raw.profession,
+    raw.category,
+    raw.serviceType,
+  ];
+  for (const candidate of candidates) {
+    const list = Array.isArray(candidate) ? candidate : [candidate];
+    const labels = list.map(toServiceLabel).filter(Boolean);
+    if (labels.length) return Array.from(new Set(labels)).join(", ");
+  }
+  return "";
+}
+
+function pickGradient(name: string): string {
+  let sum = 0;
+  for (let i = 0; i < name.length; i++) sum += name.charCodeAt(i);
+  return AVATAR_GRADIENTS[sum % AVATAR_GRADIENTS.length];
+}
+
+function RatingStars({ rating }: { rating: number }) {
+  const filled = Math.round(rating);
   return (
-    <div className="group overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1.5 hover:shadow-xl">
-      {/* Image */}
-      <div className="relative h-48 overflow-hidden bg-gradient-to-br from-[#16233B] to-[#2A3F66]">
+    <div className="flex gap-0.5" aria-hidden>
+      {Array.from({ length: 5 }).map((_, i) => (
+        <Star
+          key={i}
+          size={15}
+          className={
+            i < filled
+              ? "fill-[#E3A73A] text-[#E3A73A]"
+              : "fill-transparent text-[#16233B]/20"
+          }
+        />
+      ))}
+    </div>
+  );
+}
+
+function ProCard({
+  pro,
+  profession,
+  onViewReviews,
+}: {
+  pro: TopProfessional;
+  profession: string;
+  onViewReviews: () => void;
+}) {
+  const servicesText = profession;
+  const reviewLabel = `${pro.reviews} ${pro.reviews === 1 ? "review" : "reviews"}`;
+
+  return (
+    <article
+      aria-label={`${pro.name}, rated ${pro.rating.toFixed(1)} out of 5 from ${reviewLabel}`}
+      className="group relative flex h-full flex-col overflow-hidden rounded-3xl border border-[#16233B]/10 bg-white shadow-md shadow-[#16233B]/5 transition-all duration-300 hover:-translate-y-2 hover:border-[#E3A73A]/50 hover:shadow-2xl hover:shadow-[#16233B]/15 focus-within:ring-2 focus-within:ring-[#E3A73A] motion-reduce:transition-none motion-reduce:hover:translate-y-0"
+    >
+      {/* gold -> coral accent line */}
+      <div className="absolute inset-x-0 top-0 z-10 h-1 bg-gradient-to-r from-[#E3A73A] to-[#F26B5E]" />
+
+      {/* Image / gradient fallback */}
+      <div
+        className={`relative h-60 overflow-hidden bg-gradient-to-br ${pickGradient(
+          pro.name
+        )}`}
+      >
         {pro.image ? (
           <img
             src={pro.image}
-            alt={`${pro.name}, ${pro.service}`}
+            alt={servicesText ? `${pro.name}, ${servicesText}` : pro.name}
             loading="lazy"
-            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105 motion-reduce:transition-none motion-reduce:group-hover:scale-100"
           />
         ) : (
-          <div className="flex h-full items-center justify-center transition-transform duration-500 group-hover:scale-105">
-            <span className="flex h-20 w-20 items-center justify-center rounded-full bg-[#E3A73A] text-3xl font-bold text-[#16233B] shadow-lg">
-              {pro.name.charAt(0)}
+          <div className="relative flex h-full items-center justify-center">
+            <div
+              aria-hidden
+              className="absolute h-40 w-40 rounded-full bg-[#E3A73A]/20 blur-2xl"
+            />
+            <span
+              aria-hidden
+              className="relative flex h-28 w-28 items-center justify-center rounded-full bg-gradient-to-br from-[#E3A73A] to-[#F0BE5C] text-5xl font-bold text-[#16233B] shadow-xl ring-4 ring-white/25 transition-transform duration-500 group-hover:scale-105 motion-reduce:transition-none motion-reduce:group-hover:scale-100"
+            >
+              {pro.name.charAt(0).toUpperCase()}
             </span>
           </div>
         )}
-        <div className="absolute inset-0 bg-gradient-to-t from-[#16233B]/50 via-transparent to-transparent" />
-        <span className="absolute left-3 top-3 inline-flex items-center gap-1 rounded-full bg-white/95 px-2.5 py-1 text-xs font-semibold text-[#16233B] shadow-sm">
-          <ShieldCheck size={13} className="text-[#F26B5E]" />
-          Verified
+
+        <div className="absolute inset-0 bg-gradient-to-t from-[#16233B]/70 via-[#16233B]/5 to-transparent" />
+
+        {pro.verified && (
+          <span className="absolute left-3 top-4 inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-xs font-bold text-[#16233B] shadow-lg">
+            <ShieldCheck size={15} className="text-[#F26B5E]" />
+            Verified
+          </span>
+        )}
+
+        {/* Rating pill */}
+        <span className="absolute bottom-3 left-3 inline-flex items-center gap-1.5 rounded-full bg-[#16233B]/85 px-3 py-1.5 text-sm font-bold text-white shadow-lg backdrop-blur">
+          <Star size={15} className="fill-[#E3A73A] text-[#E3A73A]" />
+          {pro.rating.toFixed(1)}
         </span>
       </div>
 
       {/* Details */}
-      <div className="p-5">
-        <h3 className="text-lg font-bold text-[#16233B]">{pro.name}</h3>
-        <p className="text-sm text-gray-500">{pro.service}</p>
+      <div className="flex flex-1 flex-col p-6">
+        <h3 className="truncate text-xl font-extrabold tracking-tight text-[#16233B]">
+          {pro.name}
+        </h3>
 
-        <p className="mt-2 flex items-center gap-1 text-sm text-gray-400">
-          <MapPin size={14} />
-          {pro.location}
-        </p>
+        {/* Profession directly below the name */}
+        {servicesText && (
+          <p
+            className="mt-1 truncate text-sm font-semibold text-[#F26B5E]"
+            title={servicesText}
+          >
+            {servicesText}
+          </p>
+        )}
 
-        <div className="mt-3 flex items-center gap-1 text-sm">
-          <Star size={16} className="fill-[#E3A73A] text-[#E3A73A]" />
-          <span className="font-semibold text-[#16233B]">{pro.rating}</span>
-          <span className="text-gray-400">({pro.reviews} reviews)</span>
+        {/* Review count + View All Reviews */}
+        <button
+          type="button"
+          onClick={onViewReviews}
+          aria-label={`View all reviews for ${pro.name}`}
+          className="group/reviews -ml-2 mt-2 inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold text-[#16233B]/70 transition-all duration-150 ease-out hover:bg-[#F26B5E]/10 hover:text-[#F26B5E] active:scale-95 active:bg-[#F26B5E]/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#E3A73A] motion-reduce:transition-none motion-reduce:active:scale-100"
+        >
+          <span>{reviewLabel}</span>
+          <span className="text-gray-300" aria-hidden>
+            •
+          </span>
+          <span className="inline-flex items-center gap-0.5 text-[#F26B5E]">
+            View All Reviews
+            <ChevronRight
+              size={14}
+              className="transition-transform duration-200 group-hover/reviews:translate-x-0.5 group-active/reviews:translate-x-1.5 motion-reduce:transition-none"
+            />
+          </span>
+        </button>
+
+        {pro.location && (
+          <p className="mt-4 flex items-center gap-2 text-sm text-gray-600">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#F26B5E]/10 text-[#F26B5E]">
+              <MapPin size={14} />
+            </span>
+            <span className="truncate">{pro.location}</span>
+          </p>
+        )}
+
+        {/* Rating footer pinned to the bottom so cards align */}
+        <div className="mt-auto flex items-center justify-between gap-3 border-t border-[#16233B]/10 pt-5">
+          <div className="flex items-center gap-2">
+            <RatingStars rating={pro.rating} />
+            <span className="text-sm font-bold text-[#16233B]">
+              {pro.rating.toFixed(1)}
+            </span>
+          </div>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  REVIEWS MODAL                                                      */
+/* ------------------------------------------------------------------ */
+
+type ReviewsState =
+  | { status: "loading" }
+  | { status: "error" }
+  | { status: "success"; reviews: ReviewRecord[]; average: number; count: number };
+
+const formatReviewDate = (iso: string): string => {
+  const date = new Date(iso);
+  if (!iso || Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+};
+
+const reviewTime = (r: ReviewRecord): number => {
+  const t = r.createdAt ? new Date(r.createdAt).getTime() : NaN;
+  return Number.isNaN(t) ? Number.POSITIVE_INFINITY : t;
+};
+
+function ProReviewsModal({
+  pro,
+  profession,
+  onClose,
+}: {
+  pro: TopProfessional | null;
+  profession: string;
+  onClose: () => void;
+}) {
+  const [state, setState] = useState<ReviewsState>({ status: "loading" });
+  const [attempt, setAttempt] = useState(0);
+  const proId = pro?.id;
+
+  // Fetch this professional's reviews with the existing API
+  useEffect(() => {
+    if (!proId) return;
+    let cancelled = false;
+    setState({ status: "loading" });
+
+    getProviderReviews(proId)
+      .then((body: unknown) => {
+        if (cancelled) return;
+        const data = normalizeReviewsResponse(body);
+        setState({
+          status: "success",
+          reviews: data.reviews,
+          average: data.average,
+          count: data.count,
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setState({ status: "error" });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [proId, attempt]);
+
+  // Escape to close + lock page scroll while open
+  useEffect(() => {
+    if (!pro) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    const original = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = original;
+    };
+  }, [pro, onClose]);
+
+  if (!pro) return null;
+
+  const titleId = `pro-reviews-title-${pro.id}`;
+  const services = profession;
+  const sorted =
+    state.status === "success"
+      ? [...state.reviews].sort((a, b) => reviewTime(b) - reviewTime(a))
+      : [];
+  const total =
+    state.status === "success"
+      ? Math.max(state.count, state.reviews.length)
+      : 0;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+    >
+      <button
+        type="button"
+        aria-label="Close reviews"
+        onClick={onClose}
+        className="absolute inset-0 bg-[#16233B]/60 backdrop-blur-sm"
+      />
+
+      <div className="relative z-10 flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-2xl">
+        {/* Header */}
+        <div className="flex shrink-0 items-start gap-4 border-b border-gray-100 p-5 sm:p-6">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-[#16233B] to-[#2A3F66] sm:h-14 sm:w-14">
+            {pro.image ? (
+              <img
+                src={pro.image}
+                alt=""
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <span className="text-lg font-bold text-[#E3A73A]">
+                {pro.name.charAt(0).toUpperCase()}
+              </span>
+            )}
+          </div>
+
+          <div className="min-w-0 flex-1 pr-10">
+            <p className="truncate text-xs font-semibold text-[#F26B5E]">
+              {pro.name}
+              {services ? ` · ${services}` : ""}
+            </p>
+            <h2
+              id={titleId}
+              className="text-xl font-bold text-[#16233B] sm:text-2xl"
+            >
+              Customer Reviews
+            </h2>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="absolute right-4 top-4 inline-flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white text-[#16233B] shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-[#F26B5E] hover:text-[#F26B5E] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#E3A73A]"
+          >
+            <X size={18} />
+          </button>
         </div>
 
-        <Link
-          to="/professionals"
-          className="mt-4 inline-flex items-center gap-1 rounded-md text-sm font-semibold text-[#F26B5E] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F26B5E]"
-        >
-          View Profile
-          <ArrowRight
-            size={15}
-            className="transition-transform duration-200 group-hover:translate-x-1"
-          />
-        </Link>
+        {/* Body */}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5 sm:p-6">
+          {state.status === "loading" && (
+            <div role="status" aria-label="Loading reviews" className="space-y-3">
+              {[0, 1, 2].map((i) => (
+                <div
+                  key={i}
+                  aria-hidden
+                  className="animate-pulse rounded-2xl border border-gray-200 p-4 motion-reduce:animate-none"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-full bg-gray-200" />
+                    <div className="space-y-2">
+                      <div className="h-3.5 w-28 rounded bg-gray-200" />
+                      <div className="h-3 w-24 rounded bg-gray-100" />
+                    </div>
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    <div className="h-3.5 w-full rounded bg-gray-100" />
+                    <div className="h-3.5 w-2/3 rounded bg-gray-100" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {state.status === "error" && (
+            <div role="alert" className="px-4 py-12 text-center">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-red-50 text-red-500">
+                <AlertCircle size={26} aria-hidden />
+              </div>
+              <h3 className="mt-4 text-lg font-bold text-[#16233B]">
+                Unable to load reviews.
+              </h3>
+              <p className="mt-1 text-sm text-gray-500">
+                Please try again in a moment.
+              </p>
+              <button
+                type="button"
+                onClick={() => setAttempt((n) => n + 1)}
+                className="mt-5 inline-flex items-center gap-2 rounded-lg bg-[#16233B] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#F26B5E] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#E3A73A] focus-visible:ring-offset-2"
+              >
+                <RefreshCw size={15} aria-hidden />
+                Try Again
+              </button>
+            </div>
+          )}
+
+          {state.status === "success" && sorted.length === 0 && (
+            <div className="px-4 py-12 text-center">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-[#E3A73A]/15">
+                <Star size={26} aria-hidden className="fill-[#E3A73A]/40 text-[#E3A73A]" />
+              </div>
+              <h3 className="mt-4 text-lg font-bold text-[#16233B]">
+                No reviews yet
+              </h3>
+              <p className="mt-1 text-sm text-gray-500">
+                Reviews will appear here once customers share their experience.
+              </p>
+            </div>
+          )}
+
+          {state.status === "success" && sorted.length > 0 && (
+            <div className="space-y-5">
+              <div className="flex items-center gap-4 rounded-2xl border border-gray-200 bg-[#F7F4EE]/60 p-5">
+                <p className="flex items-center gap-1.5 text-4xl font-extrabold tabular-nums text-[#16233B]">
+                  {state.average.toFixed(1)}
+                  <Star size={24} aria-hidden className="fill-[#E3A73A] text-[#E3A73A]" />
+                </p>
+                <div>
+                  <RatingStars rating={state.average} />
+                  <p className="mt-1 text-sm text-gray-500">
+                    Based on {total} {total === 1 ? "review" : "reviews"}
+                  </p>
+                </div>
+              </div>
+
+              <ul className="space-y-3">
+                {sorted.map((review) => {
+                  const name = review.customerName || "Customer";
+                  const date = formatReviewDate(review.createdAt);
+                  return (
+                    <li
+                      key={review.id}
+                      className="rounded-2xl border border-gray-200 bg-white p-4"
+                    >
+                      <div className="flex items-start gap-3">
+                        {review.customerAvatar ? (
+                          <img
+                            src={review.customerAvatar}
+                            alt=""
+                            className="h-10 w-10 shrink-0 rounded-full object-cover"
+                          />
+                        ) : (
+                          <span
+                            aria-hidden
+                            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#F7F4EE] text-sm font-semibold text-[#16233B]"
+                          >
+                            {name.charAt(0).toUpperCase()}
+                          </span>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold text-[#16233B]">
+                            {name}
+                          </p>
+                          <div className="mt-1">
+                            <RatingStars rating={review.rating} />
+                          </div>
+                        </div>
+                        {date && (
+                          <time
+                            dateTime={review.createdAt}
+                            className="shrink-0 text-xs text-gray-400"
+                          >
+                            {date}
+                          </time>
+                        )}
+                      </div>
+                      {review.comment && (
+                        <p className="mt-3 whitespace-pre-line break-words text-sm leading-relaxed text-gray-700">
+                          “{review.comment}”
+                        </p>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+        </div>
       </div>
+    </div>
+  );
+}
+
+function ProCardSkeleton() {
+  return (
+    <div
+      aria-hidden
+      className="flex h-full flex-col overflow-hidden rounded-3xl border border-[#16233B]/10 bg-white shadow-md shadow-[#16233B]/5"
+    >
+      <div className="h-60 animate-pulse bg-[#16233B]/10 motion-reduce:animate-none" />
+      <div className="flex flex-1 flex-col p-6">
+        <div className="h-6 w-2/3 animate-pulse rounded bg-[#16233B]/10 motion-reduce:animate-none" />
+        <div className="mt-3 flex gap-1.5">
+          <div className="h-6 w-20 animate-pulse rounded-full bg-[#16233B]/10 motion-reduce:animate-none" />
+          <div className="h-6 w-16 animate-pulse rounded-full bg-[#16233B]/10 motion-reduce:animate-none" />
+        </div>
+        <div className="mt-4 h-4 w-2/5 animate-pulse rounded bg-[#16233B]/10 motion-reduce:animate-none" />
+        <div className="mt-auto flex items-center justify-between border-t border-[#16233B]/10 pt-5">
+          <div className="h-4 w-24 animate-pulse rounded bg-[#E3A73A]/30 motion-reduce:animate-none" />
+          <div className="h-5 w-16 animate-pulse rounded-full bg-[#16233B]/10 motion-reduce:animate-none" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StateMessage({
+  title,
+  text,
+  onRetry,
+}: {
+  title: string;
+  text: string;
+  onRetry?: () => void;
+}) {
+  return (
+    <div
+      role={onRetry ? "alert" : "status"}
+      className="col-span-full flex min-h-[18rem] flex-col items-center justify-center rounded-2xl border border-dashed border-[#16233B]/15 bg-white/70 p-8 text-center backdrop-blur-sm"
+    >
+      <Users size={28} className="text-[#E3A73A]" />
+      <p className="mt-3 text-lg font-bold text-[#16233B]">{title}</p>
+      <p className="mt-1 max-w-sm text-sm text-gray-500">{text}</p>
+      {onRetry && (
+        <button
+          onClick={onRetry}
+          className="mt-5 rounded-xl bg-[#F26B5E] px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E3A73A]"
+        >
+          Try again
+        </button>
+      )}
     </div>
   );
 }
@@ -549,7 +1189,7 @@ function BecomeAPro() {
               "mx-auto mt-4 max-w-lg text-[#F7F4EE]/80 md:mx-0"
             )}
           >
-            Join GharSewa, build your professional profile, and connect with
+            Join SewaKhoj, build your professional profile, and connect with
             customers looking for trusted services near them.
           </p>
 
@@ -560,7 +1200,7 @@ function BecomeAPro() {
                 to="/register"
                 className="group inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#F26B5E] to-[#F08454] px-6 py-3 font-semibold text-white shadow-lg shadow-[#F26B5E]/20 transition-all duration-300 hover:-translate-y-0.5 hover:brightness-110 hover:shadow-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E3A73A] focus-visible:ring-offset-2 focus-visible:ring-offset-[#16233B] motion-reduce:transition-none motion-reduce:hover:translate-y-0"
               >
-                Become a GharSewa Pro
+                Become a SewaKhoj Pro
                 <ArrowRight
                   size={18}
                   className="transition-transform duration-300 group-hover:translate-x-1 motion-reduce:transition-none motion-reduce:group-hover:translate-x-0"
@@ -884,7 +1524,7 @@ function PhoneMockup() {
 
         <div className="px-3 pt-6">
           <p className="text-sm font-extrabold tracking-tight text-[#16233B]">
-            Ghar<span className="text-[#E3A73A]">Sewa</span>
+            Sewa<span className="text-[#E3A73A]">Khoj</span>
           </p>
 
           <div className="mt-3 flex items-center gap-1.5 rounded-lg bg-[#F7F4EE] px-2 py-1.5 text-[10px] text-gray-400">

@@ -1,4 +1,3 @@
-
 import { Router } from "express";
 
 import AuthCheck from "../middleware/Auth";
@@ -16,6 +15,12 @@ reviewRouter.post(
   reviewCtrl.createReview
 );
 
+// Anyone can view the top rated providers (homepage)
+reviewRouter.get(
+  "/top-providers",
+  reviewCtrl.getTopRatedProviders
+);
+
 // Anyone can view provider reviews
 reviewRouter.get(
   "/provider/:providerId",
@@ -23,4 +28,3 @@ reviewRouter.get(
 );
 
 export default reviewRouter;
-

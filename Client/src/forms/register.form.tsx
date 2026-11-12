@@ -290,7 +290,7 @@ export const RegisterForm = () => {
                 </h2>
 
                 <p className="mt-3 text-sm leading-6 text-gray-300">
-                  Whether you need help or offer it, GharSewa connects you with
+                  Whether you need help or offer it, SewaKhoj connects you with
                   people right around the corner.
                 </p>
 
@@ -338,7 +338,7 @@ export const RegisterForm = () => {
                 <MapPin size={18} />
               </span>
               <span className="text-2xl font-extrabold tracking-tight text-[#16233B]">
-                Ghar<span className="text-[#E3A73A]">Sewa</span>
+                Sewa<span className="text-[#E3A73A]">Khoj</span>
               </span>
             </Link>
 
@@ -354,7 +354,7 @@ export const RegisterForm = () => {
             </h1>
 
             <p className="mt-2 text-sm leading-relaxed text-gray-500">
-              Join GharSewa and connect with trusted professionals for the
+              Join SewaKhoj and connect with trusted professionals for the
               services you need.
             </p>
           </div>

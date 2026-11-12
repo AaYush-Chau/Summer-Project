@@ -746,7 +746,7 @@ const DashboardHeader = ({
       {/* Brand */}
       <div className="flex min-w-0 items-center gap-3">
         <span className="text-xl font-extrabold tracking-tight text-[#16233B]">
-          Ghar<span className="text-[#E3A73A]">Sewa</span>
+          Sewa<span className="text-[#E3A73A]">Khoj</span>
         </span>
         <span
           className="hidden h-5 w-px bg-[#16233B]/10 sm:block"

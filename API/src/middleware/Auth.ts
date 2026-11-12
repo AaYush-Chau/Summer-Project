@@ -20,27 +20,31 @@ const AuthCheck = (
     next: NextFunction
   ) => {
     try {
-      let token =
-        req.headers.authorization || null;
+      const authHeader = req.headers.authorization;
 
       // ==========================================
-      // CHECK AUTHORIZATION TOKEN
+      // CHECK AUTHORIZATION HEADER FORMAT
       // ==========================================
-
-      if (!token) {
+      if (!authHeader || !authHeader.startsWith("Bearer ")) {
         return next({
           code: 401,
-          message: "Login required",
+          message: "Login required or invalid authorization format",
         });
       }
 
-      // Remove "Bearer " from token
-      token = token.replace("Bearer ", "");
+      // Safely extract the token after "Bearer "
+      const token = authHeader.split(" ")[1];
+
+      if (!token || token === "undefined" || token === "null") {
+        return next({
+          code: 401,
+          message: "Token is missing or invalid",
+        });
+      }
 
       // ==========================================
       // VERIFY JWT TOKEN
       // ==========================================
-
       const data = Jwt.verify(
         token,
         Secrets.jwtSecret as string
@@ -49,7 +53,6 @@ const AuthCheck = (
       // ==========================================
       // FIND USER
       // ==========================================
-
       const userDetail = await UserModel.findOne({
         _id: data.sub,
       });
@@ -64,7 +67,6 @@ const AuthCheck = (
       // ==========================================
       // STORE LOGGED-IN USER DETAILS
       // ==========================================
-
       req.loggedInUser = {
         id: userDetail.id as unknown as string,
         fullname: userDetail.fullname,
@@ -75,31 +77,22 @@ const AuthCheck = (
       // ==========================================
       // CHECK USER ROLE
       // ==========================================
-
-      // No specific role required
-      // → Any authenticated user can continue
       if (!role) {
         return next();
       }
 
-      // Specific role required
-      // → User role must match one of the allowed roles
       if (role.includes(userDetail.role)) {
         return next();
       }
 
-      // User is authenticated but does not have permission
       return next({
         code: 403,
         message: "Access Denied",
       });
     } catch (exception) {
-      console.log(exception);
-
       // ==========================================
       // TOKEN EXPIRED
       // ==========================================
-
       if (exception instanceof Jwt.TokenExpiredError) {
         return next({
           code: 401,
@@ -108,21 +101,19 @@ const AuthCheck = (
       }
 
       // ==========================================
-      // INVALID JWT
+      // INVALID JWT / MALFORMED
       // ==========================================
-
       if (exception instanceof Jwt.JsonWebTokenError) {
         return next({
           code: 401,
-          message:
-            "JWT Error: " + exception.message,
+          message: "JWT Error: " + exception.message,
         });
       }
 
       // ==========================================
-      // OTHER ERRORS
+      // OTHER UNEXPECTED ERRORS
       // ==========================================
-
+      console.error("Unexpected Auth Middleware Error:", exception);
       return next(exception);
     }
   };

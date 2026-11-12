@@ -1206,7 +1206,7 @@ export default function ServiceProviders() {
         {/* HEADER */}
         <header className="gs-fade-up mb-5 flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-sm sm:flex-row sm:items-center sm:gap-5 sm:px-5">
           <span className="text-xl font-extrabold tracking-tight text-[#16233B]">
-            Ghar<span className="text-[#E3A73A]">Sewa</span>
+            Sewa<span className="text-[#E3A73A]">Khoj</span>
           </span>
 
           <span

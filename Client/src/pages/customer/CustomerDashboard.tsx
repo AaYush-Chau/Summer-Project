@@ -1186,7 +1186,7 @@ const ReviewEmptyState = () => (
     </div>
     <h3 className="mt-5 text-xl font-bold text-[#16233B]">No reviews yet</h3>
     <p className="mx-auto mt-2 max-w-md text-sm text-gray-500">
-      Complete a service and share your experience with the GharSewa
+      Complete a service and share your experience with the SewaKhoj
       community.
     </p>
     <FindProfessionalButton className="mt-6" />
@@ -1230,7 +1230,7 @@ const MyReviewsSection = ({
         My Reviews
       </h2>
       <p className="mt-1 text-sm text-gray-500">
-        Your feedback and experiences with GharSewa professionals.
+        Your feedback and experiences with SewaKhoj professionals.
       </p>
     </div>
 

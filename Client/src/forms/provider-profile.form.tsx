@@ -411,7 +411,7 @@ export const ProviderProfileForm = () => {
           <div className="gs-header">
             <span className="inline-flex items-center gap-2 rounded-full border border-[#E3A73A]/30 bg-[#E3A73A]/10 px-3 py-1 text-[11px] font-semibold tracking-wider text-[#16233B]">
               <span className="h-1.5 w-1.5 rounded-full bg-[#E3A73A]" />
-              GHARSEWA PROFESSIONAL
+              SEWAKHOJ PROFESSIONAL
             </span>
 
             <h1 className="mt-4 text-2xl font-bold text-[#16233B] sm:text-3xl">
