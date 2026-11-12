@@ -269,3 +269,52 @@ export const getTopProfessionals = async (
     .sort((a, b) => b.rating - a.rating || b.reviews - a.reviews)
     .slice(0, limit);
 };
+
+// ==========================================
+// GET TOP-RATED REVIEWS (homepage "What our customers say")
+// ==========================================
+
+export type TopReview = ReviewRecord & { providerName: string };
+
+/**
+ * Highest-rated real reviews, built only from existing endpoints:
+ * the top professionals (/review/top-providers) and each one's reviews
+ * (/review/provider/:id). Sorted by rating (desc), then newest first.
+ * Reviews without a comment and duplicate ids are skipped.
+ */
+export const getTopReviews = async (
+  limit = 3,
+  signal?: AbortSignal
+): Promise<TopReview[]> => {
+  const pros = await getTopProfessionals(6, signal);
+
+  const results = await Promise.allSettled(
+    pros.map(async (pro) => {
+      const body: unknown = await getProviderReviews(pro.id);
+      return normalizeReviewsResponse(body).reviews.map(
+        (review): TopReview => ({ ...review, providerName: pro.name })
+      );
+    })
+  );
+
+  if (results.length > 0 && results.every((r) => r.status === "rejected")) {
+    throw new Error("Unable to load reviews");
+  }
+
+  const all = results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
+
+  const time = (r: ReviewRecord): number => {
+    const t = r.createdAt ? new Date(r.createdAt).getTime() : 0;
+    return Number.isNaN(t) ? 0 : t;
+  };
+
+  const seen = new Set<string>();
+  return all
+    .filter((r) => {
+      if (!r.comment || r.rating <= 0 || seen.has(r.id)) return false;
+      seen.add(r.id);
+      return true;
+    })
+    .sort((a, b) => b.rating - a.rating || time(b) - time(a))
+    .slice(0, limit);
+};

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { isCancel } from "axios";
 import {
@@ -28,8 +28,10 @@ import { Link } from "react-router-dom";
 import {
   getTopProfessionals,
   getProviderReviews,
+  getTopReviews,
   normalizeReviewsResponse,
   type TopProfessional,
+  type TopReview,
   type ReviewRecord,
 } from "../../api/review.api";
 import {
@@ -55,27 +57,6 @@ const TRENDING = [
   { name: "Wall Painting", hint: "Fresh coats, clean finish", icon: Paintbrush, image: "" },
   { name: "Bathroom Cleaning", hint: "Deep clean specialists", icon: ShowerHead, image: "" },
   { name: "Wiring & Installation", hint: "Reliable fitting & setup", icon: Plug, image: "" },
-];
-
-const TESTIMONIALS = [
-  {
-    name: "Aarav Sharma",
-    text: "SewaKhoj helped me find a reliable plumber quickly. The service was excellent.",
-    rating: 5,
-    image: "",
-  },
-  {
-    name: "Sita Thapa",
-    text: "I found a professional cleaner near my home without any hassle.",
-    rating: 5,
-    image: "",
-  },
-  {
-    name: "Bikash Gurung",
-    text: "The platform makes it easy to compare local service providers.",
-    rating: 4,
-    image: "",
-  },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -223,6 +204,52 @@ function useTopProfessionals(limit = 3) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  DATA HOOK: TOP-RATED REVIEWS                                       */
+/* ------------------------------------------------------------------ */
+
+function useTopReviews(limit = 3) {
+  const [status, setStatus] = useState<LoadStatus>("loading");
+  const [reviews, setReviews] = useState<TopReview[]>([]);
+  const [attempt, setAttempt] = useState(0);
+  const reload = useCallback(() => setAttempt((n) => n + 1), []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    // keep showing current cards during a background refresh
+    setStatus((s) => (s === "success" ? s : "loading"));
+
+    getTopReviews(limit, controller.signal)
+      .then((data) => {
+        setReviews(data);
+        setStatus("success");
+      })
+      .catch((err: unknown) => {
+        if (isCancel(err)) return;
+        console.error("top reviews failed:", err);
+        setStatus("error");
+      });
+
+    return () => controller.abort();
+  }, [limit, attempt]);
+
+  // Refresh when a review is submitted ("review:created" is dispatched by the
+  // review form's onSuccess) or when the tab becomes visible again.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") reload();
+    };
+    window.addEventListener("review:created", reload);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("review:created", reload);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [reload]);
+
+  return { status, reviews, retry: reload };
+}
+
+/* ------------------------------------------------------------------ */
 /*  PROFESSION LOOKUP                                                  */
 /* ------------------------------------------------------------------ */
 
@@ -302,6 +329,7 @@ export default function Sections() {
   const { status, pros, retry } = useTopProfessionals(3);
   const [activePro, setActivePro] = useState<TopProfessional | null>(null);
   const professions = useProfessions(pros, status === "success");
+  const topReviews = useTopReviews(3);
 
   // Same idea as ServiceProviders: open the reviews for the clicked professional
   const openReviews = (pro: TopProfessional) => setActivePro(pro);
@@ -421,7 +449,7 @@ export default function Sections() {
       {/* How It Works */}
       <HowItWorks />
 
-      {/* Testimonials */}
+      {/* Customer reviews: top-rated reviews from the database */}
       <section>
         <Reveal>
           <SectionTitle
@@ -430,17 +458,53 @@ export default function Sections() {
           />
         </Reveal>
 
-        <div className="-mx-4 flex snap-x snap-mandatory gap-5 overflow-x-auto px-4 pb-2 md:mx-0 md:grid md:grid-cols-3 md:overflow-visible md:px-0 md:pb-0">
-          {TESTIMONIALS.map((item, i) => (
-            <Reveal
-              key={item.name}
-              delay={i * 100}
-              className="w-[85%] shrink-0 snap-center sm:w-[60%] md:w-auto"
-            >
-              <TestimonialCard item={item} />
-            </Reveal>
-          ))}
-        </div>
+        {(topReviews.status === "loading" ||
+          (topReviews.status === "success" && topReviews.reviews.length > 0)) && (
+          <div
+            className="-mx-4 flex snap-x snap-mandatory gap-5 overflow-x-auto px-4 pb-2 md:mx-0 md:grid md:grid-cols-3 md:overflow-visible md:px-0 md:pb-0"
+            aria-busy={topReviews.status === "loading"}
+          >
+            {topReviews.status === "loading" &&
+              Array.from({ length: 3 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="w-[85%] shrink-0 snap-center sm:w-[60%] md:w-auto"
+                >
+                  <ReviewCardSkeleton />
+                </div>
+              ))}
+
+            {topReviews.status === "success" &&
+              topReviews.reviews.map((review, i) => (
+                <Reveal
+                  key={review.id}
+                  delay={i * 100}
+                  className="w-[85%] shrink-0 snap-center sm:w-[60%] md:w-auto"
+                >
+                  <ReviewCard review={review} />
+                </Reveal>
+              ))}
+          </div>
+        )}
+
+        {topReviews.status === "success" && topReviews.reviews.length === 0 && (
+          <div className="grid">
+            <StateMessage
+              title="No reviews yet"
+              text="Customer reviews will appear here once customers share their experience."
+            />
+          </div>
+        )}
+
+        {topReviews.status === "error" && (
+          <div className="grid">
+            <StateMessage
+              title="Couldn't load reviews"
+              text="Something went wrong while fetching customer reviews."
+              onRetry={topReviews.retry}
+            />
+          </div>
+        )}
       </section>
 
       {/* App Download */}
@@ -1479,7 +1543,35 @@ function StepCard({ step }: { step: (typeof STEPS)[number] }) {
   );
 }
 
-function TestimonialCard({ item }: { item: (typeof TESTIMONIALS)[number] }) {
+function ReviewAvatar({ src, name }: { src?: string | null; name: string }) {
+  const [failed, setFailed] = useState(false);
+
+  if (src && !failed) {
+    return (
+      <img
+        src={src}
+        alt=""
+        loading="lazy"
+        onError={() => setFailed(true)}
+        className="h-10 w-10 rounded-full object-cover"
+      />
+    );
+  }
+  return (
+    <span
+      aria-hidden
+      className="flex h-10 w-10 items-center justify-center rounded-full bg-[#16233B] text-sm font-bold text-white"
+    >
+      {name.charAt(0).toUpperCase()}
+    </span>
+  );
+}
+
+function ReviewCard({ review }: { review: TopReview }) {
+  const name = review.customerName || "Customer";
+  const date = formatReviewDate(review.createdAt);
+  const stars = Math.max(0, Math.min(5, Math.round(review.rating)));
+
   return (
     <div className="relative h-full rounded-2xl border border-gray-100 bg-white p-6 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-lg">
       <Quote
@@ -1488,28 +1580,51 @@ function TestimonialCard({ item }: { item: (typeof TESTIMONIALS)[number] }) {
         aria-hidden
       />
 
-      <div className="mb-4 flex gap-1" aria-label={`${item.rating} out of 5 stars`}>
-        {Array.from({ length: item.rating }).map((_, i) => (
+      <div className="mb-4 flex gap-1" aria-label={`${stars} out of 5 stars`}>
+        {Array.from({ length: stars }).map((_, i) => (
           <Star key={i} size={16} className="fill-[#E3A73A] text-[#E3A73A]" />
         ))}
       </div>
 
-      <p className="text-sm leading-6 text-gray-600">"{item.text}"</p>
+      <p className="text-sm leading-6 text-gray-600">"{review.comment}"</p>
 
       <div className="mt-5 flex items-center gap-3">
-        {item.image ? (
-          <img
-            src={item.image}
-            alt={item.name}
-            loading="lazy"
-            className="h-10 w-10 rounded-full object-cover"
-          />
-        ) : (
-          <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#16233B] text-sm font-bold text-white">
-            {item.name.charAt(0)}
-          </span>
-        )}
-        <p className="font-semibold text-[#16233B]">{item.name}</p>
+        <ReviewAvatar
+          key={review.customerAvatar ?? "none"}
+          src={review.customerAvatar}
+          name={name}
+        />
+        <div className="min-w-0">
+          <p className="truncate font-semibold text-[#16233B]">{name}</p>
+          <p className="truncate text-xs text-gray-500">
+            {review.providerName}
+            {review.providerName && date ? " · " : ""}
+            {date}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReviewCardSkeleton() {
+  return (
+    <div
+      aria-hidden
+      className="h-full rounded-2xl border border-gray-100 bg-white p-6 shadow-sm"
+    >
+      <div className="mb-4 h-4 w-24 animate-pulse rounded bg-[#E3A73A]/30 motion-reduce:animate-none" />
+      <div className="space-y-2">
+        <div className="h-3.5 w-full animate-pulse rounded bg-[#16233B]/10 motion-reduce:animate-none" />
+        <div className="h-3.5 w-5/6 animate-pulse rounded bg-[#16233B]/10 motion-reduce:animate-none" />
+        <div className="h-3.5 w-2/3 animate-pulse rounded bg-[#16233B]/10 motion-reduce:animate-none" />
+      </div>
+      <div className="mt-5 flex items-center gap-3">
+        <div className="h-10 w-10 animate-pulse rounded-full bg-[#16233B]/10 motion-reduce:animate-none" />
+        <div className="space-y-2">
+          <div className="h-3.5 w-24 animate-pulse rounded bg-[#16233B]/10 motion-reduce:animate-none" />
+          <div className="h-3 w-32 animate-pulse rounded bg-[#16233B]/10 motion-reduce:animate-none" />
+        </div>
       </div>
     </div>
   );
