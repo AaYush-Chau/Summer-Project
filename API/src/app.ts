@@ -47,12 +47,20 @@ app.use(
 // Rate Limiter
 // ==============================
 
+
 const limiter = rateLimit({
-  limit: 150,
-  windowMs: 300000,
+  windowMs: 5 * 60 * 1000, // 5 minutes
+  limit: 300, // 300 requests per 5 minutes
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: "Too many requests. Please try again later.",
+  },
 });
 
-app.use(limiter);
+app.use("/api", limiter);
+
 
 // ==============================
 // Body Parser

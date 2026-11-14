@@ -178,34 +178,18 @@ const loadReviews = async (
 const yearsLabel = (years: number): string =>
   `${years} ${years === 1 ? "year" : "years"}`;
 
-// "2 days ago" (null when the date is missing / invalid)
-const formatRelative = (iso: string): { text: string; full: string } | null => {
+// Exact posted date, e.g. "Nov 13, 2026"
+// (null when the date is missing / invalid). Uses the viewer's local time zone.
+const formatReviewDate = (iso: string): string | null => {
   if (!iso) return null;
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return null;
 
-  const full = date.toLocaleDateString("en-US", {
+  return date.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
   });
-  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
-  if (seconds < 60) return { text: "Just now", full };
-
-  const units: [Intl.RelativeTimeFormatUnit, number][] = [
-    ["year", 31536000],
-    ["month", 2592000],
-    ["week", 604800],
-    ["day", 86400],
-    ["hour", 3600],
-    ["minute", 60],
-  ];
-  const [unit, size] = units.find(([, s]) => seconds >= s) ?? units[5];
-  const text = new Intl.RelativeTimeFormat("en", { numeric: "auto" }).format(
-    -Math.floor(seconds / size),
-    unit
-  );
-  return { text, full };
 };
 
 // Newest first; reviews without a date yet come first
@@ -525,7 +509,7 @@ const ReviewCard = ({
   index: number;
 }) => {
   const name = own ? "You" : review.customerName || "Customer";
-  const when = formatRelative(review.createdAt);
+  const postedAt = formatReviewDate(review.createdAt);
 
   return (
     <article
@@ -560,13 +544,12 @@ const ReviewCard = ({
           </div>
         </div>
 
-        {when && (
+        {postedAt && (
           <time
             dateTime={review.createdAt}
-            title={when.full}
             className="shrink-0 text-xs text-gray-400"
           >
-            {when.text}
+            {postedAt}
           </time>
         )}
       </div>

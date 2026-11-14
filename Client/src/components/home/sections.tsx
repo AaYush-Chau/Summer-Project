@@ -34,10 +34,6 @@ import {
   type TopReview,
   type ReviewRecord,
 } from "../../api/review.api";
-import {
-  getProvidersByService,
-  type ServiceType,
-} from "../../api/services.api";
 
 /* ------------------------------------------------------------------ */
 /*  DATA                                                               */
@@ -187,15 +183,15 @@ function useTopProfessionals(limit = 3) {
     setStatus("loading");
 
     getTopProfessionals(limit, controller.signal)
-  .then((data: TopProfessional[]) => {
-    setPros(data);
-    setStatus("success");
-  })
-  .catch((err: unknown) => {
-  if (isCancel(err)) return;
-  console.error("top-providers failed:", err);
-  setStatus("error");
-});
+      .then((data: TopProfessional[]) => {
+        setPros(data);
+        setStatus("success");
+      })
+      .catch((err: unknown) => {
+        if (isCancel(err)) return;
+        console.error("top-providers failed:", err);
+        setStatus("error");
+      });
 
     return () => controller.abort();
   }, [limit, attempt]);
@@ -250,85 +246,12 @@ function useTopReviews(limit = 3) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  PROFESSION LOOKUP                                                  */
-/* ------------------------------------------------------------------ */
-
-// /review/top-providers does not always include the provider's service.
-// When it is missing, it is looked up from the same provider lists the
-// service pages use (getProvidersByService), matched by id, then by name.
-const SERVICE_KEYS = ["plumber", "electrician", "cleaner", "painter"] as const;
-
-type ProfessionMap = Record<string, string>;
-
-function useProfessions(pros: TopProfessional[], ready: boolean): ProfessionMap {
-  const [map, setMap] = useState<ProfessionMap>({});
-  const needsLookup = ready && pros.some((p) => !(p.services?.length));
-
-  useEffect(() => {
-    if (!needsLookup) return;
-    let cancelled = false;
-
-    Promise.all(
-      SERVICE_KEYS.map(async (key): Promise<{ key: string; item: unknown }[]> => {
-        try {
-          const res = await getProvidersByService(key as ServiceType);
-          const list: unknown = res?.data;
-          return Array.isArray(list) ? list.map((item) => ({ key, item })) : [];
-        } catch {
-          return [];
-        }
-      })
-    ).then((groups) => {
-      if (cancelled) return;
-      const next: ProfessionMap = {};
-
-      groups.forEach((group) =>
-        group.forEach(({ key, item }) => {
-          if (typeof item !== "object" || item === null) return;
-          const rec = item as Record<string, unknown>;
-          const label = SERVICE_LABELS[key];
-
-          if (typeof rec._id === "string") next[rec._id] = label;
-
-          const user = rec.userId;
-          if (typeof user === "object" && user !== null) {
-            const u = user as Record<string, unknown>;
-            if (typeof u._id === "string") next[u._id] = label;
-            if (typeof u.fullname === "string") {
-              next[`name:${u.fullname.trim().toLowerCase()}`] = label;
-            }
-          }
-        })
-      );
-
-      setMap(next);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [needsLookup]);
-
-  return map;
-}
-
-function professionOf(pro: TopProfessional, map: ProfessionMap): string {
-  return (
-    getProfession(pro) ||
-    map[pro.id] ||
-    map[`name:${pro.name.trim().toLowerCase()}`] ||
-    ""
-  );
-}
-
-/* ------------------------------------------------------------------ */
 /*  MAIN COMPONENT                                                     */
 /* ------------------------------------------------------------------ */
 
 export default function Sections() {
   const { status, pros, retry } = useTopProfessionals(3);
   const [activePro, setActivePro] = useState<TopProfessional | null>(null);
-  const professions = useProfessions(pros, status === "success");
   const topReviews = useTopReviews(3);
 
   // Same idea as ServiceProviders: open the reviews for the clicked professional
@@ -397,7 +320,7 @@ export default function Sections() {
                 <Reveal key={pro.id} delay={i * 100} className="h-full">
                   <ProCard
                     pro={pro}
-                    profession={professionOf(pro, professions)}
+                    profession={getProfession(pro)}
                     onViewReviews={() => openReviews(pro)}
                   />
                 </Reveal>
@@ -424,7 +347,7 @@ export default function Sections() {
       {/* Reviews modal for the selected professional */}
       <ProReviewsModal
         pro={activePro}
-        profession={activePro ? professionOf(activePro, professions) : ""}
+        profession={activePro ? getProfession(activePro) : ""}
         onClose={() => setActivePro(null)}
       />
 
